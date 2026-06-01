@@ -2,7 +2,7 @@
 
 A public data engineering platform that ingests real transit and weather data for Quito's bus rapid transit network (Trole, Ecovía, Metrobús), processes it with an AWS-native stack, and surfaces delay patterns, peak-hour insights, and weather correlations to citizens through a live dashboard.
 
-![CI](https://github.com/your-org/quito-transport-platform/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/bernabecj/quito-transport-platform/actions/workflows/ci.yml/badge.svg)
 
 ---
 
