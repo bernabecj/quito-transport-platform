@@ -1,0 +1,71 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dependencies
+        run: poetry install --with dev
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: "Deploy Lambda: gtfs-ingestion"
+        run: |
+          cd ingestion
+          zip ../lambda_gtfs.zip gtfs_loader.py __init__.py
+          cd ..
+          aws lambda update-function-code \
+            --function-name quito-gtfs-ingestion \
+            --zip-file fileb://lambda_gtfs.zip
+
+      - name: "Deploy Lambda: weather-ingestion"
+        run: |
+          cd ingestion
+          zip ../lambda_weather.zip weather_loader.py __init__.py
+          cd ..
+          aws lambda update-function-code \
+            --function-name quito-weather-ingestion \
+            --zip-file fileb://lambda_weather.zip
+
+      - name: "Upload Glue scripts to S3"
+        run: |
+          aws s3 cp processing/glue_jobs/ s3://quito-transport-scripts/glue_jobs/ --recursive
+
+      - name: "Upload DAGs to MWAA"
+        run: |
+          aws s3 cp airflow/dags/ s3://quito-transport-mwaa/dags/ --recursive
+
+      - name: "Run dbt models"
+        run: |
+          poetry run dbt run --project-dir dbt/
+          poetry run dbt test --project-dir dbt/
+        env:
+          DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
