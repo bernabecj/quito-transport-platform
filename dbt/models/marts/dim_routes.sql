@@ -1,0 +1,2 @@
+-- Dimension table: one row per transit route (Trole, Ecovía, Metrobús lines).
+-- TODO: implement transformation logic

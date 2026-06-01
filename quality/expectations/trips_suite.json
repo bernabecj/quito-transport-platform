@@ -1,0 +1,8 @@
+{
+  "expectation_suite_name": "trips_suite",
+  "expectations": [],
+  "meta": {
+    "great_expectations_version": "0.18.x",
+    "description": "Expectations for the raw GTFS trips dataset. Validates presence of required columns, null constraints, and realistic value ranges before data enters the warehouse."
+  }
+}

@@ -1,0 +1,3 @@
+-- Staging model for raw GTFS trip records.
+-- Casts types, renames columns to snake_case, and filters out malformed rows.
+-- TODO: implement transformation logic

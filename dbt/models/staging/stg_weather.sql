@@ -1,0 +1,4 @@
+-- Staging model for raw OpenWeather records.
+-- Parses nested JSON fields, aligns timestamps to Quito timezone (UTC-5),
+-- and selects relevant columns (temp, precipitation, wind, condition_code).
+-- TODO: implement transformation logic

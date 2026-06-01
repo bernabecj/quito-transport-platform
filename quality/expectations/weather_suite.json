@@ -1,0 +1,8 @@
+{
+  "expectation_suite_name": "weather_suite",
+  "expectations": [],
+  "meta": {
+    "great_expectations_version": "0.18.x",
+    "description": "Expectations for the raw OpenWeather dataset. Validates coordinate ranges, non-null timestamps, and minimum row counts per ingestion window."
+  }
+}

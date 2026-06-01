@@ -1,0 +1,30 @@
+{
+  "_comment": "IAM policy definitions for the Quito Transport Platform. Each policy follows least-privilege: only the permissions required by each component are granted.",
+  "policies": {
+    "lambda_ingestion_policy": {
+      "description": "Allows Lambda ingestion functions to write Parquet files to the S3 raw zone and read secrets from Secrets Manager.",
+      "actions": [],
+      "resources": []
+    },
+    "glue_processing_policy": {
+      "description": "Allows Glue jobs to read from the S3 raw zone, write to the processed zone, and update the Glue Data Catalog.",
+      "actions": [],
+      "resources": []
+    },
+    "airflow_orchestration_policy": {
+      "description": "Allows MWAA (Airflow) to trigger Lambda, start Glue jobs, and write logs to CloudWatch.",
+      "actions": [],
+      "resources": []
+    },
+    "redshift_load_policy": {
+      "description": "Allows Redshift to COPY data from the S3 processed zone.",
+      "actions": [],
+      "resources": []
+    },
+    "metabase_readonly_policy": {
+      "description": "Read-only Redshift role for Metabase EC2 instance.",
+      "actions": [],
+      "resources": []
+    }
+  }
+}

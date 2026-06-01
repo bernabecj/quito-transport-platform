@@ -1,0 +1,3 @@
+-- Dimension table: weather condition codes mapped to human-readable labels
+-- (e.g., 500 → "Light Rain") for use in Metabase dashboards.
+-- TODO: implement transformation logic

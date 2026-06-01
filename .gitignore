@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# Great Expectations
+gx/uncommitted/
+great_expectations/uncommitted/
+
+# AWS credentials (never commit these)
+.aws/
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+airflow/logs/

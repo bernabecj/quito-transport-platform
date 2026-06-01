@@ -1,0 +1,50 @@
+version: 2
+
+models:
+  - name: fct_trips
+    description: "Fact table — one row per completed trip with weather context and computed delay."
+    columns:
+      - name: trip_id
+        description: "Unique identifier for a scheduled trip."
+        tests:
+          - not_null
+          - unique
+      - name: route_id
+        description: "Foreign key to dim_routes."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_routes')
+              field: route_id
+      - name: delay_minutes
+        description: "Actual delay in minutes relative to scheduled departure. Negative values indicate early arrivals."
+      - name: weather_condition_id
+        description: "Foreign key to dim_weather_conditions."
+        tests:
+          - relationships:
+              to: ref('dim_weather_conditions')
+              field: condition_id
+
+  - name: dim_routes
+    description: "All Quito transit routes — Trole, Ecovía, Metrobús."
+    columns:
+      - name: route_id
+        tests:
+          - not_null
+          - unique
+
+  - name: dim_stops
+    description: "Transit stops enriched with OSM coordinates and neighbourhood."
+    columns:
+      - name: stop_id
+        tests:
+          - not_null
+          - unique
+
+  - name: dim_weather_conditions
+    description: "OpenWeather condition code lookup table."
+    columns:
+      - name: condition_id
+        tests:
+          - not_null
+          - unique

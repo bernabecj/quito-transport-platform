@@ -1,0 +1,39 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: gtfs_trips
+        description: "Raw GTFS trip records loaded from S3 via Redshift COPY."
+      - name: gtfs_stops
+        description: "Raw GTFS stop records with coordinates and names."
+      - name: weather
+        description: "Raw OpenWeather API responses for Quito coordinates."
+
+models:
+  - name: stg_trips
+    description: "Cleaned and typed GTFS trip records."
+    columns:
+      - name: trip_id
+        description: "Unique identifier for a scheduled trip."
+        tests:
+          - not_null
+          - unique
+
+  - name: stg_stops
+    description: "Cleaned GTFS stop records with validated coordinates."
+    columns:
+      - name: stop_id
+        description: "Unique identifier for a transit stop."
+        tests:
+          - not_null
+          - unique
+
+  - name: stg_weather
+    description: "Cleaned weather observations aligned to Quito timezone."
+    columns:
+      - name: observed_at
+        description: "Timestamp of the weather observation (UTC-5)."
+        tests:
+          - not_null

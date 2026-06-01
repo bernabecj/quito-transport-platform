@@ -1,0 +1,3 @@
+-- Staging model for raw GTFS stop records.
+-- Casts coordinates to FLOAT, standardises stop names, drops duplicates.
+-- TODO: implement transformation logic

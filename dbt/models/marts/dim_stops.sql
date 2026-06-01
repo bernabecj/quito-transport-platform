@@ -1,0 +1,2 @@
+-- Dimension table: one row per stop, enriched with OSM geolocation metadata.
+-- TODO: implement transformation logic
