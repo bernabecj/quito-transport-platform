@@ -16,13 +16,25 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.13"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: poetry install --with dev
 
       - name: Run pytest
-        run: pytest tests/ -v
+        run: poetry run pytest
 
   dbt-tests:
     name: dbt Tests
@@ -38,14 +50,26 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install dbt
-        run: pip install dbt-redshift
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
+      - name: Install dbt dependencies
+        run: poetry install --with dbt
 
       - name: dbt deps
-        run: dbt deps --project-dir dbt/
+        run: poetry run dbt deps --project-dir dbt/
 
       - name: dbt test
-        run: dbt test --project-dir dbt/
+        run: poetry run dbt test --project-dir dbt/
 
   great-expectations:
     name: Data Quality Suite
@@ -59,8 +83,20 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache virtualenv
+        uses: actions/cache@v4
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: poetry install --with dev
 
       - name: Run Great Expectations suites
-        run: great_expectations checkpoint run trips_checkpoint
+        run: poetry run great_expectations checkpoint run trips_checkpoint
