@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "PowerShell(if \\(-not $?\\) { \"Directory does not exist or is empty\" })"
+      "PowerShell(if \\(-not $?\\) { \"Directory does not exist or is empty\" })",
+      "Bash(poetry add *)",
+      "Bash(poetry install *)",
+      "Bash(poetry run *)",
+      "Bash(poetry lock *)"
     ]
   }
 }
