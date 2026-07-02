@@ -36,8 +36,15 @@
         "ms-python.vscode-pylance",
         "ms-python.black-formatter",
         "ms-python.isort",
+        "ms-python.debugpy",
+        "ms-python.vscode-python-envs",
+        "kevinrose.vsc-python-indent",
         "innoverio.vscode-dbt-power-user",
-        "ms-azuretools.vscode-docker"
+        "ms-azuretools.vscode-docker",
+        "ms-azuretools.vscode-containers",
+        "eamodio.gitlens",
+        "esbenp.prettier-vscode",
+        "anthropic.claude-code"
       ],
       "settings": {
         "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
@@ -46,7 +53,10 @@
           "editor.defaultFormatter": "ms-python.black-formatter",
           "editor.formatOnSave": true
         },
-        "isort.args": ["--profile", "black"]
+        "isort.args": ["--profile", "black"],
+        "prettier.tabWidth": 4,
+        "editor.minimap.enabled": false,
+        "editor.stickyScroll.enabled": false
       }
     }
   }

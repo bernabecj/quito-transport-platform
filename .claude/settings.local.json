@@ -5,7 +5,10 @@
       "Bash(poetry add *)",
       "Bash(poetry install *)",
       "Bash(poetry run *)",
-      "Bash(poetry lock *)"
+      "Bash(poetry lock *)",
+      "Bash(code --list-extensions --show-versions)",
+      "Bash(cat \"/c/Users/berna/AppData/Roaming/Code/User/settings.json\" 2>&1 | head -100)",
+      "Read(//c/Users/berna/AppData/Roaming/Code/User/**)"
     ]
   }
 }
