@@ -4,6 +4,8 @@ A public data engineering platform that ingests real transit and weather data fo
 
 ![CI](https://github.com/bernabecj/quito-transport-platform/actions/workflows/ci.yml/badge.svg)
 
+See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the original pitch, the 3-week build plan, and the interview narrative behind this project.
+
 ---
 
 ## Why this exists
