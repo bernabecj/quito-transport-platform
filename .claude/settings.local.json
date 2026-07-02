@@ -8,7 +8,9 @@
       "Bash(poetry lock *)",
       "Bash(code --list-extensions --show-versions)",
       "Bash(cat \"/c/Users/berna/AppData/Roaming/Code/User/settings.json\" 2>&1 | head -100)",
-      "Read(//c/Users/berna/AppData/Roaming/Code/User/**)"
+      "Read(//c/Users/berna/AppData/Roaming/Code/User/**)",
+      "Bash(find /workspaces/quito-transport-platform -maxdepth 3 -iname \"*.mcp*\" -o -iname \"mcp.json\" 2>/dev/null; echo \"---\"; find /workspaces/quito-transport-platform -maxdepth 2 -name \".mcp.json\" 2>/dev/null; echo \"---claude config---\"; cat /workspaces/quito-transport-platform/.claude/settings.json 2>/dev/null; cat /workspaces/quito-transport-platform/.claude/settings.local.json 2>/dev/null; cat ~/.claude.json 2>/dev/null | head -100)",
+      "Read(//home/vscode/**)"
     ]
   }
 }

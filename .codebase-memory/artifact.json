@@ -1,0 +1,11 @@
+{
+    "schema_version": 1,
+    "commit": "72a256f0a7370c0a3646c8cb562e3a7f989bae26",
+    "indexed_at": "2026-07-02T17:21:03Z",
+    "project": "workspaces-quito-transport-platform",
+    "nodes": 350,
+    "edges": 504,
+    "original_size": 1441792,
+    "compressed_size": 92152,
+    "compression_level": 9
+}
