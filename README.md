@@ -187,6 +187,22 @@ python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\act
 pip install -r requirements.txt
 ```
 
+### Airflow environment
+
+`apache-airflow` requires Python <3.13, while the rest of this project targets
+3.13+, so it's installed into its own venv rather than the main one. Regenerate
+it any time (fresh clone, container rebuild, dependency bump) with:
+
+```bash
+./scripts/setup_airflow_env.sh
+source .venv-airflow/bin/activate
+```
+
+The script is idempotent: it installs a Poetry-managed Python 3.11 if missing,
+creates `.venv-airflow/` if missing, and runs `poetry install --with dev --with
+airflow` against it. Nothing under `.venv-airflow/` is committed — `pyproject.toml`
++ `poetry.lock` are the source of truth it's rebuilt from.
+
 ### Run ingestion locally
 
 ```bash
