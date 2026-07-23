@@ -8,7 +8,7 @@ readme = "README.md"
 packages = [{ include = "ingestion" }, { include = "processing" }]
 
 [tool.poetry.dependencies]
-python = ">=3.11,<3.14"
+python = ">=3.11,<3.12"
 requests = "^2.32"
 boto3 = "^1.34"
 pyarrow = "^18.0"
@@ -33,7 +33,7 @@ dbt-redshift = "^1.8"
 optional = true
 
 [tool.poetry.group.airflow.dependencies]
-apache-airflow = { version = "^2.9", extras = ["amazon"], python = "<3.13" }
+apache-airflow = { version = "^2.9", extras = ["amazon"] }
 
 [tool.black]
 line-length = 100

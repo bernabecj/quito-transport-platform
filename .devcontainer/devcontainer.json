@@ -1,6 +1,6 @@
 {
   "name": "Quito Transport Platform",
-  "image": "mcr.microsoft.com/devcontainers/python:3.13",
+  "image": "mcr.microsoft.com/devcontainers/python:3.11",
   "features": {
     "ghcr.io/devcontainers-extra/features/poetry:2": {
       "version": "latest"
