@@ -12,7 +12,7 @@ resource "aws_glue_catalog_database" "main" {
 
 resource "aws_glue_job" "clean_trips" {
   name              = "${var.project_name}-clean-trips"
-  role_arn          = aws_iam_role.glue_exec.arn
+  role_arn          = data.aws_iam_role.glue_processing.arn
   glue_version      = "4.0"
   worker_type       = "G.1X"
   number_of_workers = 2
@@ -25,8 +25,7 @@ resource "aws_glue_job" "clean_trips" {
 
   default_arguments = {
     "--job-language"                   = "python"
-    "--RAW_BUCKET"                     = aws_s3_bucket.raw.bucket
-    "--PROCESSED_BUCKET"               = aws_s3_bucket.processed.bucket
+    "--bucket"                         = data.aws_s3_bucket.main.bucket
     "--enable-continuous-cloudwatch-log" = "true"
     "--enable-metrics"                 = "true"
   }
@@ -38,7 +37,7 @@ resource "aws_glue_job" "clean_trips" {
 
 resource "aws_glue_job" "enrich_weather" {
   name              = "${var.project_name}-enrich-weather"
-  role_arn          = aws_iam_role.glue_exec.arn
+  role_arn          = data.aws_iam_role.glue_processing.arn
   glue_version      = "4.0"
   worker_type       = "G.1X"
   number_of_workers = 2
@@ -51,8 +50,7 @@ resource "aws_glue_job" "enrich_weather" {
 
   default_arguments = {
     "--job-language"                   = "python"
-    "--RAW_BUCKET"                     = aws_s3_bucket.raw.bucket
-    "--PROCESSED_BUCKET"               = aws_s3_bucket.processed.bucket
+    "--bucket"                         = data.aws_s3_bucket.main.bucket
     "--enable-continuous-cloudwatch-log" = "true"
     "--enable-metrics"                 = "true"
   }

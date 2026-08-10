@@ -1,0 +1,26 @@
+# docker-outside-of-docker note: the Docker daemon backing this devcontainer is
+# Docker Desktop on the Windows host, so bind-mount sources must be real Windows
+# host paths (not /workspaces/... which only exists inside this devcontainer) —
+# otherwise Docker silently creates/mounts an empty directory.
+services:
+  webserver:
+    volumes:
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/dags:/usr/local/airflow/dags
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/plugins:/usr/local/airflow/plugins
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/include:/usr/local/airflow/include
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/tests:/usr/local/airflow/tests
+      - //c/Users/berna/.aws:/home/astro/.aws:ro
+  scheduler:
+    volumes:
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/dags:/usr/local/airflow/dags
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/plugins:/usr/local/airflow/plugins
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/include:/usr/local/airflow/include
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/tests:/usr/local/airflow/tests
+      - //c/Users/berna/.aws:/home/astro/.aws:ro
+  triggerer:
+    volumes:
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/dags:/usr/local/airflow/dags
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/plugins:/usr/local/airflow/plugins
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/include:/usr/local/airflow/include
+      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/tests:/usr/local/airflow/tests
+      - //c/Users/berna/.aws:/home/astro/.aws:ro

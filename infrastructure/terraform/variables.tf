@@ -10,16 +10,16 @@ variable "project_name" {
   default     = "quito-transport"
 }
 
+variable "bucket_name" {
+  description = "Name of the existing, manually-created S3 bucket holding raw/processed/quality-reports data"
+  type        = string
+  default     = "quito-transport-platform"
+}
+
 variable "environment" {
   description = "Deployment environment"
   type        = string
   default     = "prod"
-}
-
-variable "openweather_secret_name" {
-  description = "Name of the OpenWeather API key secret in Secrets Manager"
-  type        = string
-  default     = "quito-transport/openweather-api-key"
 }
 
 variable "redshift_master_password" {

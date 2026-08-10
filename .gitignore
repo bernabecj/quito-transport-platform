@@ -7,6 +7,9 @@ venv/
 dist/
 build/
 
+# Vendored installers (the dev container installs the AWS CLI itself)
+awscliv2.zip
+
 # Environment
 .env
 .env.*
@@ -36,3 +39,13 @@ Thumbs.db
 # Logs
 *.log
 airflow/logs/
+
+# Terraform
+infrastructure/terraform/.terraform/
+infrastructure/terraform/*.tfstate
+infrastructure/terraform/*.tfstate.backup
+infrastructure/terraform/.terraform.tfstate.lock.info
+
+# Astro / local Airflow
+airflow/.env
+airflow/.astro/

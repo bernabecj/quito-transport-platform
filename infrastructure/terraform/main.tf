@@ -18,43 +18,19 @@ provider "aws" {
   region = var.aws_region
 }
 
-resource "aws_s3_bucket" "raw" {
-  bucket = "${var.project_name}-raw"
-}
-
-resource "aws_s3_bucket" "processed" {
-  bucket = "${var.project_name}-processed"
+# quito-transport-platform was created manually (raw/, processed/, quality-reports/
+# prefixes) — referenced here, not managed by Terraform.
+data "aws_s3_bucket" "main" {
+  bucket = var.bucket_name
 }
 
 resource "aws_s3_bucket" "scripts" {
   bucket = "${var.project_name}-scripts"
 }
 
-resource "aws_s3_bucket" "quality_reports" {
-  bucket = "${var.project_name}-quality-reports"
-}
-
-resource "aws_s3_bucket" "mwaa" {
-  bucket = "${var.project_name}-mwaa"
-}
-
-resource "aws_s3_bucket_versioning" "raw" {
-  bucket = aws_s3_bucket.raw.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_s3_bucket_versioning" "processed" {
-  bucket = aws_s3_bucket.processed.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
-
-resource "aws_secretsmanager_secret" "openweather" {
-  name        = var.openweather_secret_name
-  description = "OpenWeather API key for Quito transport ingestion"
+# quito/openweather was created manually — referenced here, not managed by Terraform.
+data "aws_secretsmanager_secret" "openweather" {
+  name = "quito/openweather"
 }
 
 resource "aws_redshift_cluster" "main" {
@@ -65,5 +41,5 @@ resource "aws_redshift_cluster" "main" {
   node_type           = "dc2.large"
   cluster_type        = "single-node"
   skip_final_snapshot = true
-  iam_roles           = [aws_iam_role.redshift_load.arn]
+  iam_roles           = [aws_iam_role.redshift_role.arn]
 }

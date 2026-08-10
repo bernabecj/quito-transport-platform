@@ -7,31 +7,16 @@ data "aws_caller_identity" "current" {}
 data "aws_region" "current" {}
 
 # -----------------------------------------------------------------------------
-# Lambda Execution Role: quito-lambda-role
+# Lambda Execution Role: lambda-ingestion-role (created manually, referenced here)
 # -----------------------------------------------------------------------------
 
-resource "aws_iam_role" "lambda_role" {
-  name = "quito-lambda-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect    = "Allow"
-        Principal = { Service = "lambda.amazonaws.com" }
-        Action    = "sts:AssumeRole"
-      }
-    ]
-  })
-
-  tags = {
-    Project = var.project_name
-  }
+data "aws_iam_role" "lambda_ingestion" {
+  name = "lambda-ingestion-role"
 }
 
 resource "aws_iam_policy" "lambda_s3_policy" {
   name        = "${var.project_name}-lambda-s3-policy"
-  description = "Allow Lambda to read/write the raw S3 bucket"
+  description = "Allow Lambda to write Parquet files to the raw S3 prefix"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -42,23 +27,7 @@ resource "aws_iam_policy" "lambda_s3_policy" {
           "s3:PutObject",
           "s3:GetObject"
         ]
-        Resource = "arn:aws:s3:::quito-transport-raw/*"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_policy" "lambda_secretsmanager_policy" {
-  name        = "${var.project_name}-lambda-secretsmanager-policy"
-  description = "Allow Lambda to read the OpenWeather API key from Secrets Manager"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect = "Allow"
-        Action = "secretsmanager:GetSecretValue"
-        Resource = "arn:aws:secretsmanager:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:secret:quito-transport/openweather-api-key*"
+        Resource = "${data.aws_s3_bucket.main.arn}/raw/*"
       }
     ]
   })
@@ -85,54 +54,34 @@ resource "aws_iam_policy" "lambda_cloudwatch_policy" {
 }
 
 resource "aws_iam_role_policy_attachment" "lambda_s3_attach" {
-  role       = aws_iam_role.lambda_role.name
+  role       = data.aws_iam_role.lambda_ingestion.name
   policy_arn = aws_iam_policy.lambda_s3_policy.arn
 }
 
-resource "aws_iam_role_policy_attachment" "lambda_secretsmanager_attach" {
-  role       = aws_iam_role.lambda_role.name
-  policy_arn = aws_iam_policy.lambda_secretsmanager_policy.arn
-}
-
 resource "aws_iam_role_policy_attachment" "lambda_cloudwatch_attach" {
-  role       = aws_iam_role.lambda_role.name
+  role       = data.aws_iam_role.lambda_ingestion.name
   policy_arn = aws_iam_policy.lambda_cloudwatch_policy.arn
 }
 
 # -----------------------------------------------------------------------------
-# Glue Execution Role: quito-glue-role
+# Glue Execution Role: glue-processing-role (created manually, referenced here)
 # -----------------------------------------------------------------------------
 
-resource "aws_iam_role" "glue_role" {
-  name = "quito-glue-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect    = "Allow"
-        Principal = { Service = "glue.amazonaws.com" }
-        Action    = "sts:AssumeRole"
-      }
-    ]
-  })
-
-  tags = {
-    Project = var.project_name
-  }
+data "aws_iam_role" "glue_processing" {
+  name = "glue-processing-role"
 }
 
 resource "aws_iam_policy" "glue_s3_policy" {
   name        = "${var.project_name}-glue-s3-policy"
-  description = "Allow Glue to read raw/scripts buckets and read/write processed bucket"
+  description = "Allow Glue to read raw/scripts prefixes and read/write the processed prefix"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = ["s3:GetObject"]
-        Resource = "arn:aws:s3:::quito-transport-raw/*"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${data.aws_s3_bucket.main.arn}/raw/*"
       },
       {
         Effect = "Allow"
@@ -140,12 +89,12 @@ resource "aws_iam_policy" "glue_s3_policy" {
           "s3:PutObject",
           "s3:GetObject"
         ]
-        Resource = "arn:aws:s3:::quito-transport-processed/*"
+        Resource = "${data.aws_s3_bucket.main.arn}/processed/*"
       },
       {
-        Effect = "Allow"
-        Action = ["s3:GetObject"]
-        Resource = "arn:aws:s3:::quito-transport-scripts/*"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${aws_s3_bucket.scripts.arn}/*"
       }
     ]
   })
@@ -184,41 +133,26 @@ resource "aws_iam_policy" "glue_cloudwatch_policy" {
 }
 
 resource "aws_iam_role_policy_attachment" "glue_s3_attach" {
-  role       = aws_iam_role.glue_role.name
+  role       = data.aws_iam_role.glue_processing.name
   policy_arn = aws_iam_policy.glue_s3_policy.arn
 }
 
 resource "aws_iam_role_policy_attachment" "glue_datacatalog_attach" {
-  role       = aws_iam_role.glue_role.name
+  role       = data.aws_iam_role.glue_processing.name
   policy_arn = aws_iam_policy.glue_datacatalog_policy.arn
 }
 
 resource "aws_iam_role_policy_attachment" "glue_cloudwatch_attach" {
-  role       = aws_iam_role.glue_role.name
+  role       = data.aws_iam_role.glue_processing.name
   policy_arn = aws_iam_policy.glue_cloudwatch_policy.arn
 }
 
 # -----------------------------------------------------------------------------
-# Airflow Execution Role: quito-airflow-role
+# Airflow/MWAA Execution Role: airflow-orchestration-role (created manually)
 # -----------------------------------------------------------------------------
 
-resource "aws_iam_role" "airflow_role" {
-  name = "quito-airflow-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect    = "Allow"
-        Principal = { Service = "airflow.amazonaws.com" }
-        Action    = "sts:AssumeRole"
-      }
-    ]
-  })
-
-  tags = {
-    Project = var.project_name
-  }
+data "aws_iam_role" "airflow_orchestration" {
+  name = "airflow-orchestration-role"
 }
 
 resource "aws_iam_policy" "airflow_lambda_policy" {
@@ -254,8 +188,8 @@ resource "aws_iam_policy" "airflow_glue_policy" {
           "glue:GetJobRun"
         ]
         Resource = [
-          "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:job/quito-clean-trips",
-          "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:job/quito-enrich-weather"
+          "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:job/quito-transport-clean-trips",
+          "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:job/quito-transport-enrich-weather"
         ]
       }
     ]
@@ -264,7 +198,7 @@ resource "aws_iam_policy" "airflow_glue_policy" {
 
 resource "aws_iam_policy" "airflow_s3_policy" {
   name        = "${var.project_name}-airflow-s3-policy"
-  description = "Allow Airflow to access all project S3 buckets"
+  description = "Allow Airflow to access all project S3 data"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -276,22 +210,18 @@ resource "aws_iam_policy" "airflow_s3_policy" {
           "s3:PutObject"
         ]
         Resource = [
-          "arn:aws:s3:::quito-transport-raw/*",
-          "arn:aws:s3:::quito-transport-processed/*",
-          "arn:aws:s3:::quito-transport-scripts/*",
-          "arn:aws:s3:::quito-transport-quality-reports/*",
-          "arn:aws:s3:::quito-transport-mwaa/*"
+          "${data.aws_s3_bucket.main.arn}/raw/*",
+          "${data.aws_s3_bucket.main.arn}/processed/*",
+          "${data.aws_s3_bucket.main.arn}/quality-reports/*",
+          "${aws_s3_bucket.scripts.arn}/*"
         ]
       },
       {
         Effect = "Allow"
         Action = "s3:ListBucket"
         Resource = [
-          "arn:aws:s3:::quito-transport-raw",
-          "arn:aws:s3:::quito-transport-processed",
-          "arn:aws:s3:::quito-transport-scripts",
-          "arn:aws:s3:::quito-transport-quality-reports",
-          "arn:aws:s3:::quito-transport-mwaa"
+          data.aws_s3_bucket.main.arn,
+          aws_s3_bucket.scripts.arn
         ]
       }
     ]
@@ -315,27 +245,27 @@ resource "aws_iam_policy" "airflow_cloudwatch_policy" {
 }
 
 resource "aws_iam_role_policy_attachment" "airflow_lambda_attach" {
-  role       = aws_iam_role.airflow_role.name
+  role       = data.aws_iam_role.airflow_orchestration.name
   policy_arn = aws_iam_policy.airflow_lambda_policy.arn
 }
 
 resource "aws_iam_role_policy_attachment" "airflow_glue_attach" {
-  role       = aws_iam_role.airflow_role.name
+  role       = data.aws_iam_role.airflow_orchestration.name
   policy_arn = aws_iam_policy.airflow_glue_policy.arn
 }
 
 resource "aws_iam_role_policy_attachment" "airflow_s3_attach" {
-  role       = aws_iam_role.airflow_role.name
+  role       = data.aws_iam_role.airflow_orchestration.name
   policy_arn = aws_iam_policy.airflow_s3_policy.arn
 }
 
 resource "aws_iam_role_policy_attachment" "airflow_cloudwatch_attach" {
-  role       = aws_iam_role.airflow_role.name
+  role       = data.aws_iam_role.airflow_orchestration.name
   policy_arn = aws_iam_policy.airflow_cloudwatch_policy.arn
 }
 
 # -----------------------------------------------------------------------------
-# Redshift Load Role: quito-redshift-role
+# Redshift Load Role: quito-redshift-role (not created yet — pending Redshift opt-in)
 # -----------------------------------------------------------------------------
 
 resource "aws_iam_role" "redshift_role" {
@@ -359,20 +289,20 @@ resource "aws_iam_role" "redshift_role" {
 
 resource "aws_iam_policy" "redshift_s3_policy" {
   name        = "${var.project_name}-redshift-s3-policy"
-  description = "Allow Redshift to read from the processed S3 bucket"
+  description = "Allow Redshift to read from the processed S3 prefix"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow"
-        Action = ["s3:GetObject"]
-        Resource = "arn:aws:s3:::quito-transport-processed/*"
+        Effect   = "Allow"
+        Action   = ["s3:GetObject"]
+        Resource = "${data.aws_s3_bucket.main.arn}/processed/*"
       },
       {
         Effect   = "Allow"
         Action   = "s3:ListBucket"
-        Resource = "arn:aws:s3:::quito-transport-processed"
+        Resource = data.aws_s3_bucket.main.arn
       }
     ]
   })

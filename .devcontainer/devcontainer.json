@@ -1,12 +1,21 @@
 {
   "name": "Quito Transport Platform",
-  "image": "mcr.microsoft.com/devcontainers/python:3.11",
+  "build": {
+    "dockerfile": "Dockerfile",
+    // Context is the repo root so the image build can COPY pyproject.toml and
+    // poetry.lock. The root .dockerignore keeps .venv/.git/large artefacts out
+    // of the context that gets sent to the daemon.
+    "context": "..",
+    "args": {
+      "POETRY_GROUPS": "--with dev"
+    }
+  },
+  // docker-outside-of-docker stays a feature: it wires up the host Docker
+  // socket and group permissions, which is fiddly to hand-roll. The other four
+  // features (poetry, aws-cli, terraform, github-cli) are baked into the
+  // Dockerfile instead.
   "features": {
-    "ghcr.io/devcontainers-extra/features/poetry:2": {
-      "version": "latest"
-    },
-    "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/aws-cli:1": {}
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
   },
   "mounts": [
     {
@@ -28,7 +37,9 @@
       "consistency": "cached"
     }
   ],
-  "postCreateCommand": "poetry install --with dev",
+  // No postCreateCommand: dependencies are already installed into /opt/venv at
+  // image build time. If poetry.lock changes (e.g. after a git pull), run
+  // "Dev Containers: Rebuild Container" to pick it up.
   "customizations": {
     "vscode": {
       "extensions": [
@@ -47,8 +58,8 @@
         "anthropic.claude-code"
       ],
       "settings": {
-        "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
-        "python.terminal.activateEnvironment": true,
+        "python.defaultInterpreterPath": "/opt/venv/bin/python",
+        "python.terminal.activateEnvironment": false,
         "[python]": {
           "editor.defaultFormatter": "ms-python.black-formatter",
           "editor.formatOnSave": true

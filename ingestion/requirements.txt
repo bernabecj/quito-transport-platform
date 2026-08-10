@@ -1,0 +1,8 @@
+# Runtime dependencies for the Lambda container image (ingestion/Dockerfile).
+# Versions match poetry.lock so local dev and the deployed Lambda behave the same.
+requests==2.34.2
+boto3==1.43.19
+pyarrow==18.1.0
+pandas==2.3.3
+numpy==1.26.4
+python-dotenv==1.2.2

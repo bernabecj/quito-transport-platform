@@ -1,17 +1,22 @@
 # ──────────────────────────────────────────────
-# Lambda: package ingestion scripts as ZIP files
+# Lambda: container image (pandas/pyarrow don't fit a plain zip deploy)
 # ──────────────────────────────────────────────
+# Image is built and pushed by infrastructure/scripts/deploy_lambda_image.sh —
+# Terraform only creates the repo and references whatever tag was last pushed.
 
-data "archive_file" "gtfs_lambda" {
-  type        = "zip"
-  source_file = "${path.root}/../../ingestion/gtfs_loader.py"
-  output_path = "/tmp/lambda_gtfs.zip"
+resource "aws_ecr_repository" "ingestion" {
+  name                 = "${var.project_name}-ingestion"
+  image_tag_mutability = "MUTABLE"
 }
 
-data "archive_file" "weather_lambda" {
-  type        = "zip"
-  source_file = "${path.root}/../../ingestion/weather_loader.py"
-  output_path = "/tmp/lambda_weather.zip"
+data "aws_ecr_image" "ingestion_latest" {
+  repository_name = aws_ecr_repository.ingestion.name
+  image_tag       = "latest"
+}
+
+# weather_loader.py reads the API key directly from this env var at runtime.
+data "aws_secretsmanager_secret_version" "openweather" {
+  secret_id = data.aws_secretsmanager_secret.openweather.id
 }
 
 # ──────────────────────────────────────────────
@@ -19,21 +24,16 @@ data "archive_file" "weather_lambda" {
 # ──────────────────────────────────────────────
 
 resource "aws_lambda_function" "gtfs_ingestion" {
-  function_name    = "quito-gtfs-ingestion"
-  description      = "Ingests GTFS transit data into the raw S3 bucket"
-  filename         = data.archive_file.gtfs_lambda.output_path
-  source_code_hash = data.archive_file.gtfs_lambda.output_base64sha256
-  role             = aws_iam_role.lambda_exec.arn
-  handler          = "gtfs_loader.handler"
-  runtime          = "python3.13"
-  timeout          = 300
-  memory_size      = 256
+  function_name = "quito-gtfs-ingestion"
+  description   = "Ingests GTFS transit data into the S3 raw prefix"
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.ingestion.repository_url}@${data.aws_ecr_image.ingestion_latest.image_digest}"
+  role          = data.aws_iam_role.lambda_ingestion.arn
+  timeout       = 300
+  memory_size   = 512
 
-  environment {
-    variables = {
-      BUCKET_NAME = aws_s3_bucket.raw.bucket
-      SECRET_NAME = var.openweather_secret_name
-    }
+  image_config {
+    command = ["ingestion.gtfs_loader.handler"]
   }
 
   tags = {
@@ -43,20 +43,21 @@ resource "aws_lambda_function" "gtfs_ingestion" {
 }
 
 resource "aws_lambda_function" "weather_ingestion" {
-  function_name    = "quito-weather-ingestion"
-  description      = "Ingests weather data from OpenWeather API into the raw S3 bucket"
-  filename         = data.archive_file.weather_lambda.output_path
-  source_code_hash = data.archive_file.weather_lambda.output_base64sha256
-  role             = aws_iam_role.lambda_exec.arn
-  handler          = "weather_loader.handler"
-  runtime          = "python3.13"
-  timeout          = 300
-  memory_size      = 256
+  function_name = "quito-weather-ingestion"
+  description   = "Ingests weather data from OpenWeather API into the S3 raw prefix"
+  package_type  = "Image"
+  image_uri     = "${aws_ecr_repository.ingestion.repository_url}@${data.aws_ecr_image.ingestion_latest.image_digest}"
+  role          = data.aws_iam_role.lambda_ingestion.arn
+  timeout       = 300
+  memory_size   = 512
+
+  image_config {
+    command = ["ingestion.weather_loader.handler"]
+  }
 
   environment {
     variables = {
-      BUCKET_NAME = aws_s3_bucket.raw.bucket
-      SECRET_NAME = var.openweather_secret_name
+      OPENWEATHER_API_KEY = jsondecode(data.aws_secretsmanager_secret_version.openweather.secret_string)["OPENWEATHER_API_KEY"]
     }
   }
 

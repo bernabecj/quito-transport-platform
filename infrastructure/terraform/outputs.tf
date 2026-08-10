@@ -1,27 +1,12 @@
 # S3 Bucket Outputs
-output "raw_bucket_name" {
-  description = "Name of the S3 bucket for raw ingested data"
-  value       = aws_s3_bucket.raw.bucket
-}
-
-output "processed_bucket_name" {
-  description = "Name of the S3 bucket for processed/transformed data"
-  value       = aws_s3_bucket.processed.bucket
+output "main_bucket_name" {
+  description = "Name of the existing S3 bucket holding raw/processed/quality-reports data"
+  value       = data.aws_s3_bucket.main.bucket
 }
 
 output "scripts_bucket_name" {
   description = "Name of the S3 bucket for Glue and ETL scripts"
   value       = aws_s3_bucket.scripts.bucket
-}
-
-output "mwaa_bucket_name" {
-  description = "Name of the S3 bucket for MWAA (Managed Airflow) DAGs and plugins"
-  value       = aws_s3_bucket.mwaa.bucket
-}
-
-output "quality_reports_bucket_name" {
-  description = "Name of the S3 bucket for data quality reports"
-  value       = aws_s3_bucket.quality_reports.bucket
 }
 
 # Lambda Function Outputs
@@ -60,5 +45,5 @@ output "redshift_database" {
 # Secrets Manager Outputs
 output "openweather_secret_name" {
   description = "Name of the Secrets Manager secret storing the OpenWeather API key"
-  value       = aws_secretsmanager_secret.openweather.name
+  value       = data.aws_secretsmanager_secret.openweather.name
 }

@@ -47,11 +47,12 @@ def validate_weather(**context) -> None:
 AWS_CONN_ID = "aws_default"
 REDSHIFT_CONN_ID = "redshift_default"
 
-RAW_BUCKET = "quito-transport-raw"
-PROCESSED_BUCKET = "quito-transport-processed"
+BUCKET = "quito-transport-platform"
+RAW_PREFIX = "raw"
+PROCESSED_PREFIX = "processed"
 SCRIPTS_BUCKET = "quito-transport-scripts"
 
-GLUE_ROLE = "AWSGlueServiceRole-quito-transport"
+GLUE_ROLE = "glue-processing-role"
 
 DBT_PROJECT_DIR = "/usr/local/airflow/dbt"
 DBT_PROFILES_DIR = "/usr/local/airflow/dbt"
@@ -115,8 +116,7 @@ with DAG(
         },
         script_args={
             "--execution_date": "{{ ds }}",
-            "--raw_bucket": RAW_BUCKET,
-            "--processed_bucket": PROCESSED_BUCKET,
+            "--bucket": BUCKET,
         },
         wait_for_completion=True,
     )
@@ -134,7 +134,7 @@ with DAG(
         },
         script_args={
             "--execution_date": "{{ ds }}",
-            "--processed_bucket": PROCESSED_BUCKET,
+            "--bucket": BUCKET,
         },
         wait_for_completion=True,
     )
@@ -144,8 +144,8 @@ with DAG(
         task_id="load_trips_to_redshift",
         schema="staging",
         table="stg_trips",
-        s3_bucket=PROCESSED_BUCKET,
-        s3_key="trips/{{ ds_nodash }}/",
+        s3_bucket=BUCKET,
+        s3_key=f"{PROCESSED_PREFIX}/trips/" + "{{ ds_nodash }}/",
         copy_options=["FORMAT AS PARQUET"],
         aws_conn_id=AWS_CONN_ID,
         redshift_conn_id=REDSHIFT_CONN_ID,
@@ -155,8 +155,8 @@ with DAG(
         task_id="load_weather_to_redshift",
         schema="staging",
         table="stg_weather",
-        s3_bucket=PROCESSED_BUCKET,
-        s3_key="weather/{{ ds_nodash }}/",
+        s3_bucket=BUCKET,
+        s3_key=f"{PROCESSED_PREFIX}/weather/" + "{{ ds_nodash }}/",
         copy_options=["FORMAT AS PARQUET"],
         aws_conn_id=AWS_CONN_ID,
         redshift_conn_id=REDSHIFT_CONN_ID,

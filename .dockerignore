@@ -1,0 +1,61 @@
+# Applies to every build that uses the repo root as its context:
+#   - .devcontainer/Dockerfile  (context: "..")
+#   - ingestion/Dockerfile      (docker build -f ingestion/Dockerfile .)
+#
+# Exclusions only — source stays in the context, so the ingestion image still
+# gets the full `ingestion` package it imports from.
+
+# Virtualenv: ~27k files / ~1 GB, never wanted in an image
+.venv/
+venv/
+
+# Git history (72 MB here, and nothing in any build reads it)
+.git/
+.gitignore
+.gitattributes
+
+# Stray vendored installer — see also the untracking in .gitignore
+awscliv2.zip
+
+# Python build/test artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets: never bake these into an image layer
+.env
+.env.*
+.aws/
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+
+# Terraform state and provider plugins
+infrastructure/terraform/.terraform/
+infrastructure/terraform/*.tfstate
+infrastructure/terraform/*.tfstate.backup
+infrastructure/terraform/.terraform.tfstate.lock.info
+
+# Airflow local runtime
+airflow/logs/
+airflow/.astro/
+airflow/.env
+
+# Editor / tooling / local caches
+.vscode/
+.idea/
+.github/
+.claude/
+.codebase-memory/
+docs/
+*.log
