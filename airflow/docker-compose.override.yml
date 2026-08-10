@@ -1,26 +1,31 @@
-# docker-outside-of-docker note: the Docker daemon backing this devcontainer is
-# Docker Desktop on the Windows host, so bind-mount sources must be real Windows
-# host paths (not /workspaces/... which only exists inside this devcontainer) —
-# otherwise Docker silently creates/mounts an empty directory.
+# The Astro stack is launched from inside the dev container, but
+# docker-outside-of-docker means the daemon running these containers is Docker
+# Desktop on the host. Bind-mount sources are resolved against the *host*
+# filesystem, so Astro's own defaults (which point at /workspaces/... , the
+# in-container path) resolve to nothing and Docker silently substitutes an empty
+# directory. These overrides restore them using real host paths.
+#
+# HOST_PROJECT_ROOT and HOST_HOME are exported by /etc/profile.d/20-astro-host-paths.sh
+# (source: .devcontainer/host-paths.sh), derived per machine from the host paths
+# devcontainer.json injects. That keeps this file free of any one developer's
+# username or folder layout. Note they cannot live in airflow/.env: Astro passes
+# that file to the containers, not to Compose's variable interpolation.
+#
+# The `:?` form makes Compose abort with the message below when the variables
+# are missing, instead of interpolating empty strings and quietly mounting empty
+# directories — which is the failure mode this whole arrangement exists to avoid.
+
+x-host-volumes: &host-volumes
+  - ${HOST_PROJECT_ROOT:?unset - open a new shell, or rebuild the dev container}/airflow/dags:/usr/local/airflow/dags
+  - ${HOST_PROJECT_ROOT}/airflow/plugins:/usr/local/airflow/plugins
+  - ${HOST_PROJECT_ROOT}/airflow/include:/usr/local/airflow/include
+  - ${HOST_PROJECT_ROOT}/airflow/tests:/usr/local/airflow/tests
+  - ${HOST_HOME:?unset - open a new shell, or rebuild the dev container}/.aws:/home/astro/.aws:ro
+
 services:
   webserver:
-    volumes:
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/dags:/usr/local/airflow/dags
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/plugins:/usr/local/airflow/plugins
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/include:/usr/local/airflow/include
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/tests:/usr/local/airflow/tests
-      - //c/Users/berna/.aws:/home/astro/.aws:ro
+    volumes: *host-volumes
   scheduler:
-    volumes:
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/dags:/usr/local/airflow/dags
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/plugins:/usr/local/airflow/plugins
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/include:/usr/local/airflow/include
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/tests:/usr/local/airflow/tests
-      - //c/Users/berna/.aws:/home/astro/.aws:ro
+    volumes: *host-volumes
   triggerer:
-    volumes:
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/dags:/usr/local/airflow/dags
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/plugins:/usr/local/airflow/plugins
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/include:/usr/local/airflow/include
-      - //c/Users/berna/Documents/data-engineering/quito-transport-platform/airflow/tests:/usr/local/airflow/tests
-      - //c/Users/berna/.aws:/home/astro/.aws:ro
+    volumes: *host-volumes

@@ -37,6 +37,14 @@
       "consistency": "cached"
     }
   ],
+  // Raw host paths, needed because the Astro stack's bind mounts are resolved
+  // by Docker Desktop on the host rather than inside this container.
+  // host-paths.sh (installed into /etc/profile.d) converts these into the form
+  // Compose needs; see airflow/docker-compose.override.yml.
+  "containerEnv": {
+    "HOST_WORKSPACE_FOLDER": "${localWorkspaceFolder}",
+    "HOST_USER_HOME": "${localEnv:USERPROFILE}"
+  },
   // No postCreateCommand: dependencies are already installed into /opt/venv at
   // image build time. If poetry.lock changes (e.g. after a git pull), run
   // "Dev Containers: Rebuild Container" to pick it up.

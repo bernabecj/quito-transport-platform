@@ -104,4 +104,10 @@ RUN set -eux; \
     fi; \
     astro version
 
+# --- Host path translation for the Astro stack -------------------------------
+# See the script header. Kept last so editing it does not invalidate the
+# dependency layer above.
+COPY .devcontainer/host-paths.sh /etc/profile.d/20-astro-host-paths.sh
+RUN chmod 0644 /etc/profile.d/20-astro-host-paths.sh
+
 WORKDIR /workspaces
