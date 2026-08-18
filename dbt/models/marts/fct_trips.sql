@@ -1,4 +1,0 @@
--- Fact table: one row per completed trip.
--- Joins stg_trips with stg_weather to attach weather conditions at
--- departure time; computes delay_minutes and weather_condition_id.
--- TODO: implement transformation logic

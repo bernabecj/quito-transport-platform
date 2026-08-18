@@ -1,3 +1,3 @@
--- Staging model for raw GTFS trip records.
+-- Staging model for raw OSM transit route records.
 -- Casts types, renames columns to snake_case, and filters out malformed rows.
 -- TODO: implement transformation logic

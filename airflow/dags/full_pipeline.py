@@ -4,12 +4,13 @@ End-to-end daily orchestration for the Quito Transport platform.
 
 Task graph
 ──────────
-  ingest_gtfs ──► validate_gtfs ──► clean_trips ──┐
-                                                    ├──► enrich_weather ──► load_to_redshift ──► dbt_run ──► dbt_test
-  ingest_weather ──► validate_weather ─────────────┘
+  ingest_network ──► validate_network ──► clean_network ──┐
+                                                          ├──► enrich_weather ──► load_to_redshift ──► dbt_run ──► dbt_test
+  ingest_weather ──► validate_weather ────────────────────┘
 
 Stages
   INGEST    : Lambda functions pull raw data to S3 raw zone
+              (network topology from OpenStreetMap, weather from OpenWeather)
   VALIDATE  : Great Expectations gates — DAG halts if quality fails
   TRANSFORM : AWS Glue PySpark jobs clean and enrich data to S3 processed zone
   LOAD      : S3 → Redshift staging tables; dbt models build fact/dim layer
@@ -34,9 +35,9 @@ from airflow.providers.amazon.aws.transfers.s3_to_redshift import S3ToRedshiftOp
 from callbacks import alert_cloudwatch
 
 
-def validate_gtfs(**context) -> None:
+def validate_network(**context) -> None:
     """Placeholder — implement with Great Expectations in the quality step."""
-    raise NotImplementedError("validate_gtfs: Great Expectations suite not yet wired up")
+    raise NotImplementedError("validate_network: Great Expectations suite not yet wired up")
 
 
 def validate_weather(**context) -> None:
@@ -73,13 +74,13 @@ with DAG(
     start_date=datetime(2024, 1, 1),
     catchup=False,
     default_args=DEFAULT_ARGS,
-    tags=["pipeline", "gtfs", "weather"],
+    tags=["pipeline", "network", "weather"],
 ) as dag:
 
     # ── INGEST ────────────────────────────────────────────────────────────────
-    ingest_gtfs = LambdaInvokeFunctionOperator(
-        task_id="ingest_gtfs",
-        function_name="quito-gtfs-ingestion",
+    ingest_network = LambdaInvokeFunctionOperator(
+        task_id="ingest_network",
+        function_name="quito-network-ingestion",
         payload=json.dumps({}),
         aws_conn_id=AWS_CONN_ID,
     )
@@ -92,9 +93,9 @@ with DAG(
     )
 
     # ── VALIDATE ──────────────────────────────────────────────────────────────
-    validate_gtfs_task = PythonOperator(
-        task_id="validate_gtfs",
-        python_callable=validate_gtfs,
+    validate_network_task = PythonOperator(
+        task_id="validate_network",
+        python_callable=validate_network,
     )
 
     validate_weather_task = PythonOperator(
@@ -103,10 +104,10 @@ with DAG(
     )
 
     # ── TRANSFORM ─────────────────────────────────────────────────────────────
-    clean_trips = GlueJobOperator(
-        task_id="clean_trips",
-        job_name="quito-transport-clean-trips",
-        script_location=f"s3://{SCRIPTS_BUCKET}/glue_jobs/clean_trips.py",
+    clean_network = GlueJobOperator(
+        task_id="clean_network",
+        job_name="quito-transport-clean-network",
+        script_location=f"s3://{SCRIPTS_BUCKET}/glue_jobs/clean_network.py",
         aws_conn_id=AWS_CONN_ID,
         iam_role_name=GLUE_ROLE,
         create_job_kwargs={
@@ -140,12 +141,12 @@ with DAG(
     )
 
     # ── LOAD ──────────────────────────────────────────────────────────────────
-    load_trips_to_redshift = S3ToRedshiftOperator(
-        task_id="load_trips_to_redshift",
+    load_routes_to_redshift = S3ToRedshiftOperator(
+        task_id="load_routes_to_redshift",
         schema="staging",
-        table="stg_trips",
+        table="stg_routes",
         s3_bucket=BUCKET,
-        s3_key=f"{PROCESSED_PREFIX}/trips/" + "{{ ds_nodash }}/",
+        s3_key=f"{PROCESSED_PREFIX}/routes/" + "{{ ds_nodash }}/",
         copy_options=["FORMAT AS PARQUET"],
         aws_conn_id=AWS_CONN_ID,
         redshift_conn_id=REDSHIFT_CONN_ID,
@@ -180,11 +181,11 @@ with DAG(
     )
 
     # ── task dependencies ─────────────────────────────────────────────────────
-    ingest_gtfs >> validate_gtfs_task >> clean_trips
+    ingest_network >> validate_network_task >> clean_network
     ingest_weather >> validate_weather_task
 
-    [clean_trips, validate_weather_task] >> enrich_weather
+    [clean_network, validate_weather_task] >> enrich_weather
 
-    enrich_weather >> [load_trips_to_redshift, load_weather_to_redshift]
+    enrich_weather >> [load_routes_to_redshift, load_weather_to_redshift]
 
-    [load_trips_to_redshift, load_weather_to_redshift] >> dbt_run >> dbt_test
+    [load_routes_to_redshift, load_weather_to_redshift] >> dbt_run >> dbt_test

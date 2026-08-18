@@ -1,14 +1,9 @@
 version: 2
 
 models:
-  - name: fct_trips
-    description: "Fact table — one row per completed trip with weather context and computed delay."
+  - name: fct_route_stops
+    description: "Fact table — one row per route-stop pair per snapshot date."
     columns:
-      - name: trip_id
-        description: "Unique identifier for a scheduled trip."
-        tests:
-          - not_null
-          - unique
       - name: route_id
         description: "Foreign key to dim_routes."
         tests:
@@ -16,30 +11,41 @@ models:
           - relationships:
               to: ref('dim_routes')
               field: route_id
-      - name: delay_minutes
-        description: "Actual delay in minutes relative to scheduled departure. Negative values indicate early arrivals."
-      - name: weather_condition_id
-        description: "Foreign key to dim_weather_conditions."
+      - name: stop_id
+        description: "Foreign key to dim_stops."
         tests:
+          - not_null
           - relationships:
-              to: ref('dim_weather_conditions')
-              field: condition_id
+              to: ref('dim_stops')
+              field: stop_id
+      - name: stop_sequence
+        description: "Position of the stop along the route. Ordering only — OSM carries no timetable, so this is not a departure order."
+      - name: snapshot_date
+        description: "Date the network was captured from Overpass. Enables tracking network change over time."
+        tests:
+          - not_null
 
   - name: dim_routes
-    description: "All Quito transit routes — Trole, Ecovía, Metrobús."
+    description: "All Quito transit routes — Trole, Ecovía, Metrobús and the private cooperatives."
     columns:
       - name: route_id
+        description: "OpenStreetMap relation ID for the route."
         tests:
           - not_null
           - unique
+      - name: operator
+        description: "Operating company as tagged in OSM. Null for roughly 6% of routes."
 
   - name: dim_stops
-    description: "Transit stops enriched with OSM coordinates and neighbourhood."
+    description: "Transit stops with OSM coordinates, shelter tag and neighbourhood."
     columns:
       - name: stop_id
+        description: "OpenStreetMap node ID for the stop."
         tests:
           - not_null
           - unique
+      - name: shelter
+        description: "Whether the stop has a shelter, per OSM tagging. Drives the rider-exposure analysis."
 
   - name: dim_weather_conditions
     description: "OpenWeather condition code lookup table."

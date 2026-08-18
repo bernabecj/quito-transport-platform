@@ -1,0 +1,4 @@
+-- Fact table: one row per route-stop pair per snapshot date.
+-- Grain is route x stop x snapshot_date, which lets coverage and overlap be
+-- measured over time as the network changes.
+-- TODO: implement transformation logic

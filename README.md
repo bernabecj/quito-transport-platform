@@ -1,23 +1,32 @@
 # Quito Transport Platform
 
-A public data engineering platform that ingests real transit and weather data for Quito's bus rapid transit network (Trole, Ecovía, Metrobús), processes it with an AWS-native stack, and surfaces delay patterns, peak-hour insights, and weather correlations to citizens through a live dashboard.
+A public data engineering platform that ingests Quito's transit network and weather data, processes it with an AWS-native stack, and surfaces network coverage, service gaps and rider exposure to the elements through a live dashboard.
 
 ![CI](https://github.com/bernabecj/quito-transport-platform/actions/workflows/ci.yml/badge.svg)
 
-See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the original pitch, the 3-week build plan, and the interview narrative behind this project.
+See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the build plan and the interview narrative behind this project.
 
 ---
 
 ## Why this exists
 
-Quito's public transport serves hundreds of thousands of daily commuters, yet reliable data about delays, worst routes, and peak congestion is not publicly accessible. This platform changes that by building an open, observable data pipeline that turns raw GTFS schedules and weather observations into actionable insights — delay heatmaps, peak-hour traffic by route, and weather-delay correlations — all freely accessible.
+Quito's public transport serves hundreds of thousands of daily commuters across a city stretched along a high-altitude valley. Which neighbourhoods the network actually reaches, where stops cluster or thin out, and how much of the network leaves riders standing in the rain are all questions nobody publishes an answer to. This platform builds an open, observable pipeline that turns the city's transit topology and weather observations into answerable questions — coverage maps, service-gap analysis, and shelter exposure by route.
+
+### A note on data availability
+
+This project originally aimed to analyse **delays** from a GTFS schedule feed. That turned out to be impossible, and the reason is worth stating plainly because it shaped the whole design:
+
+- **Quito publishes no GTFS feed.** Verified against [transit.land](https://www.transit.land/)'s registry (786 feeds) and MobilityData's [Mobility Database](https://mobilitydatabase.org/) catalogue (3,462 feeds) — neither indexes a single Ecuadorian feed. The URL this repo originally pointed at returns 404 and was never captured by the Internet Archive.
+- **Delay analysis needs GTFS-Realtime anyway.** Measuring a delay means comparing actual against scheduled departure. Static GTFS carries only the schedule half, so even a working static feed would not have supported the original metric.
+
+The network topology comes instead from **OpenStreetMap**, which maps Quito's transit in genuine detail — 515 route relations covering Trole, Ecovía, Metrobús and the private cooperatives, with 93–99% completeness on operator, ref, origin and destination. OSM carries no timetables, so this platform analyses **network structure**, not schedule adherence. Every metric below is derived from data that actually exists.
 
 ---
 
 ## Architecture
 
 ```
-APIs (GTFS + OpenWeather + OpenStreetMap)
+APIs (OpenStreetMap Overpass + OpenWeather)
               │
        AWS Lambda (scheduled ingestion trigger)
               │
@@ -62,22 +71,49 @@ AWS Glue / PySpark    Great Expectations
 
 ## Data Sources
 
-| Source          | What it provides                               | Cost      |
-| --------------- | ---------------------------------------------- | --------- |
-| Quito GTFS feed | Static transit schedules: routes, stops, trips | Free      |
-| OpenWeather API | Current + 5-day forecast by coordinates        | Free tier |
-| OpenStreetMap   | Geolocation enrichment for stops and routes    | Free      |
+| Source                    | What it provides                                               | Cost |
+| ------------------------- | -------------------------------------------------------------- | ---- |
+| OpenStreetMap (Overpass)  | Transit routes, stops, stop ordering, operator, shelter tags   | Free |
+| OpenWeather API           | Current + 5-day forecast for Quito                             | Free tier |
+
+The Overpass API needs no credentials and answers in seconds. It does rate-limit and shed load under contention (HTTP 429/504), so [`ingestion/network_loader.py`](ingestion/network_loader.py) cycles through two endpoints with exponential backoff.
+
+### Why ingest daily if the network is near-static?
+
+Each run writes a dated snapshot. Over time those snapshots become a longitudinal record of how the network changes — routes added or withdrawn, stops relocated, shelters appearing. That change history is itself a dataset, and it is the reason the raw zone is partitioned by `year/month/day`.
+
+---
+
+## Datasets
+
+The ingestion Lambda produces three tables per snapshot:
+
+| Dataset       | Grain                  | Key columns                                                       |
+| ------------- | ---------------------- | ----------------------------------------------------------------- |
+| `routes`      | one row per route      | `route_id`, `route_ref`, `route_name`, `route_type`, `operator`, `origin`, `destination` |
+| `stops`       | one row per stop       | `stop_id`, `stop_name`, `latitude`, `longitude`, `stop_type`, `shelter` |
+| `route_stops` | one row per route–stop | `route_id`, `stop_id`, `stop_sequence`, `member_role`             |
+
+`stop_sequence` is the stop's position along the route. It is **not** a timetable ordering — there are no times in this data.
 
 ---
 
 ## Data Model (Star Schema)
 
 ```
-fct_trips
- ├── route_id     → dim_routes
- ├── stop_id      → dim_stops
- └── condition_id → dim_weather_conditions
+fct_route_stops                      fct_daily_weather
+ ├── route_id  → dim_routes           └── condition_id → dim_weather_conditions
+ ├── stop_id   → dim_stops
+ └── snapshot_date
 ```
+
+Analytical questions this supports:
+
+- **Coverage** — which parts of Quito are within walking distance of a stop, and which are not?
+- **Service gaps** — where does stop density thin out relative to population?
+- **Route overlap** — which corridors carry many redundant routes while others carry one?
+- **Rider exposure** — what share of stops have shelter, and which routes leave riders most exposed to rain?
+- **Network change** — what has been added or withdrawn since the first snapshot?
 
 All models and column descriptions live in the dbt docs site (see [Running dbt docs](#running-dbt-docs)).
 
@@ -90,10 +126,14 @@ Testing happens at three layers:
 ### 1. PyTest — unit tests for Python transformation logic (TDD)
 
 ```python
-def test_calculate_delay_returns_minutes():
-    scheduled = datetime(2024, 1, 1, 8, 0)
-    actual    = datetime(2024, 1, 1, 8, 15)
-    assert calculate_delay(scheduled, actual) == 15
+def test_route_stops_are_sequenced_from_zero():
+    relation = {"id": 1, "members": [
+        {"type": "node", "ref": 10, "role": "stop"},
+        {"type": "way",  "ref": 99, "role": ""},
+        {"type": "node", "ref": 11, "role": "platform"},
+    ]}
+    records = _route_stop_records(relation, "2026-01-01T00:00:00Z")
+    assert [r["stop_sequence"] for r in records] == [0, 1]
 ```
 
 Run: `pytest tests/ -v`
@@ -103,15 +143,16 @@ Run: `pytest tests/ -v`
 Runs before any data enters the warehouse. The Airflow DAG halts and alerts if any expectation fails.
 
 ```python
-df.expect_column_to_exist("trip_id")
+df.expect_column_to_exist("route_id")
 df.expect_column_values_to_not_be_null("stop_id")
-df.expect_column_values_to_be_between("duration_minutes", min_value=1, max_value=180)
+df.expect_column_values_to_be_between("latitude", min_value=-0.45, max_value=0.05)
+df.expect_column_values_to_be_between("longitude", min_value=-78.65, max_value=-78.30)
 ```
 
 ### 3. dbt Tests — data integrity in the warehouse
 
 ```yaml
-- name: trip_id
+- name: stop_id
   tests:
       - unique
       - not_null
@@ -122,7 +163,7 @@ df.expect_column_values_to_be_between("duration_minutes", min_value=1, max_value
             field: route_id
 ```
 
-Custom SQL test: `dbt/tests/assert_no_negative_delays.sql`
+Custom SQL test: `dbt/tests/assert_stops_within_quito_bbox.sql`
 
 ---
 
@@ -132,34 +173,33 @@ Custom SQL test: `dbt/tests/assert_no_negative_delays.sql`
 quito-transport-platform/
 ├── airflow/
 │   └── dags/
-│       ├── ingest_gtfs.py          # DAG: pull GTFS feed → S3 raw
+│       ├── ingest_network.py       # DAG: pull OSM network → S3 raw
 │       ├── ingest_weather.py       # DAG: pull OpenWeather → S3 raw
 │       └── full_pipeline.py        # DAG: end-to-end orchestration
 ├── ingestion/
-│   ├── gtfs_loader.py              # Fetch + convert GTFS to Parquet
+│   ├── network_loader.py           # Query Overpass, normalise to Parquet
 │   └── weather_loader.py           # Fetch + normalise OpenWeather
 ├── processing/
 │   └── glue_jobs/
-│       ├── clean_trips.py          # PySpark: clean raw GTFS trips
-│       └── enrich_weather.py       # PySpark: join trips + weather
+│       ├── clean_network.py        # PySpark: clean raw network snapshots
+│       └── enrich_weather.py       # PySpark: join network + weather
 ├── quality/
 │   └── expectations/
-│       ├── trips_suite.json        # GE expectations for trip data
+│       ├── network_suite.json      # GE expectations for network data
 │       └── weather_suite.json      # GE expectations for weather data
 ├── dbt/
 │   ├── models/
-│   │   ├── staging/                # stg_trips, stg_stops, stg_weather
-│   │   └── marts/                  # fct_trips, dim_routes, dim_stops, dim_weather_conditions
+│   │   ├── staging/                # stg_routes, stg_stops, stg_weather
+│   │   └── marts/                  # fct_route_stops, dim_routes, dim_stops, dim_weather_conditions
 │   ├── tests/
-│   │   └── assert_no_negative_delays.sql
 │   └── dbt_project.yml
 ├── metabase/
 │   └── docker-compose.yml          # Local Metabase for development
 ├── infrastructure/
-│   └── iam_policies.json           # Least-privilege IAM policy definitions
-├── .github/
-│   └── workflows/
-│       └── ci.yml                  # GitHub Actions: test → dbt test → GE suite
+│   ├── terraform/                  # Lambda, Glue, Redshift, IAM
+│   └── scripts/                    # Container image build + push
+├── docs/
+│   └── PROJECT_PLAN.md
 ├── DATA_GOVERNANCE.md              # Ownership, retention, PII, SLA, access control
 ├── requirements.txt
 ├── .gitignore
@@ -174,7 +214,7 @@ quito-transport-platform/
 ### Prerequisites
 
 - Python 3.11+
-- Docker + Docker Compose (for Metabase)
+- Docker + Docker Compose (for Metabase and local Airflow)
 - AWS credentials configured (`~/.aws/credentials` or environment variables)
 - OpenWeather API key stored in AWS Secrets Manager or `.env`
 
@@ -190,8 +230,26 @@ pip install -r requirements.txt
 ### Run ingestion locally
 
 ```bash
-python ingestion/gtfs_loader.py
-python ingestion/weather_loader.py
+python -m ingestion.network_loader   # queries Overpass, writes to S3
+python -m ingestion.weather_loader
+```
+
+To inspect the network data without writing to S3:
+
+```bash
+python -c "
+from ingestion.network_loader import fetch_network, parse_network
+from datetime import datetime, timezone
+dfs = parse_network(fetch_network(), datetime.now(timezone.utc))
+for name, df in dfs.items():
+    print(name, len(df))
+"
+```
+
+### Run local Airflow
+
+```bash
+cd airflow && astro dev start        # UI at http://localhost:8080
 ```
 
 ### Run unit tests
@@ -248,6 +306,8 @@ See [DATA_GOVERNANCE.md](DATA_GOVERNANCE.md) for:
 - SLA (pipeline completes by 06:00 Quito time)
 - Access control matrix (IAM roles + Redshift roles)
 - Partitioning strategy
+
+OpenStreetMap data is licensed under the [ODbL](https://www.openstreetmap.org/copyright) and requires attribution in any published derivative.
 
 ---
 

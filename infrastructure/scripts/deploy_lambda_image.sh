@@ -6,7 +6,7 @@
 # Terraform can't build Docker images itself, so this is a separate manual step:
 #   1. terraform apply -target=aws_ecr_repository.ingestion
 #   2. infrastructure/scripts/deploy_lambda_image.sh
-#   3. terraform apply -target=aws_lambda_function.gtfs_ingestion \
+#   3. terraform apply -target=aws_lambda_function.network_ingestion \
 #        -target=aws_lambda_function.weather_ingestion
 set -euo pipefail
 

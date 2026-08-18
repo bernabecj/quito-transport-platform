@@ -37,14 +37,14 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: sa-east-1
 
-      - name: "Deploy Lambda: gtfs-ingestion"
+      - name: "Deploy Lambda: network-ingestion"
         run: |
           cd ingestion
-          zip ../lambda_gtfs.zip gtfs_loader.py __init__.py
+          zip ../lambda_network.zip network_loader.py __init__.py
           cd ..
           aws lambda update-function-code \
-            --function-name quito-gtfs-ingestion \
-            --zip-file fileb://lambda_gtfs.zip
+            --function-name quito-network-ingestion \
+            --zip-file fileb://lambda_network.zip
 
       - name: "Deploy Lambda: weather-ingestion"
         run: |

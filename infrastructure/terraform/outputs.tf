@@ -10,9 +10,9 @@ output "scripts_bucket_name" {
 }
 
 # Lambda Function Outputs
-output "gtfs_lambda_name" {
-  description = "Name of the Lambda function for GTFS data ingestion"
-  value       = aws_lambda_function.gtfs_ingestion.function_name
+output "network_lambda_name" {
+  description = "Name of the Lambda function for OSM network ingestion"
+  value       = aws_lambda_function.network_ingestion.function_name
 }
 
 output "weather_lambda_name" {
@@ -21,9 +21,9 @@ output "weather_lambda_name" {
 }
 
 # Glue Job Outputs
-output "glue_clean_trips_name" {
-  description = "Name of the Glue job for cleaning trips data"
-  value       = aws_glue_job.clean_trips.name
+output "glue_clean_network_name" {
+  description = "Name of the Glue job for cleaning network data"
+  value       = aws_glue_job.clean_network.name
 }
 
 output "glue_enrich_weather_name" {

@@ -4,25 +4,27 @@ sources:
   - name: raw
     schema: raw
     tables:
-      - name: gtfs_trips
-        description: "Raw GTFS trip records loaded from S3 via Redshift COPY."
-      - name: gtfs_stops
-        description: "Raw GTFS stop records with coordinates and names."
+      - name: network_routes
+        description: "Raw OSM transit route relations loaded from S3 via Redshift COPY."
+      - name: network_stops
+        description: "Raw OSM stop nodes with coordinates, names and shelter tags."
+      - name: network_route_stops
+        description: "Raw bridge records linking routes to the stops they serve, in order."
       - name: weather
         description: "Raw OpenWeather API responses for Quito coordinates."
 
 models:
-  - name: stg_trips
-    description: "Cleaned and typed GTFS trip records."
+  - name: stg_routes
+    description: "Cleaned and typed OSM transit route records."
     columns:
-      - name: trip_id
-        description: "Unique identifier for a scheduled trip."
+      - name: route_id
+        description: "Unique identifier for a transit route."
         tests:
           - not_null
           - unique
 
   - name: stg_stops
-    description: "Cleaned GTFS stop records with validated coordinates."
+    description: "Cleaned OSM stop records with validated coordinates."
     columns:
       - name: stop_id
         description: "Unique identifier for a transit stop."

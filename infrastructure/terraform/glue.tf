@@ -7,11 +7,11 @@ resource "aws_glue_catalog_database" "main" {
 }
 
 # ---------------------------------------------------------------------------
-# AWS Glue Job: quito-clean-trips
+# AWS Glue Job: quito-clean-network
 # ---------------------------------------------------------------------------
 
-resource "aws_glue_job" "clean_trips" {
-  name              = "${var.project_name}-clean-trips"
+resource "aws_glue_job" "clean_network" {
+  name              = "${var.project_name}-clean-network"
   role_arn          = data.aws_iam_role.glue_processing.arn
   glue_version      = "4.0"
   worker_type       = "G.1X"
@@ -19,7 +19,7 @@ resource "aws_glue_job" "clean_trips" {
 
   command {
     name            = "glueetl"
-    script_location = "s3://${aws_s3_bucket.scripts.bucket}/glue_jobs/clean_trips.py"
+    script_location = "s3://${aws_s3_bucket.scripts.bucket}/glue_jobs/clean_network.py"
     python_version  = "3"
   }
 

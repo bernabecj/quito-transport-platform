@@ -1,0 +1,8 @@
+{
+  "expectation_suite_name": "network_suite",
+  "expectations": [],
+  "meta": {
+    "great_expectations_version": "0.18.x",
+    "description": "Expectations for the raw OSM transit network datasets (routes, stops, route_stops). Validates presence of required columns, null constraints, coordinates inside the Quito bounding box, and a minimum route count that guards against a truncated Overpass response."
+  }
+}

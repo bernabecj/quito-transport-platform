@@ -166,7 +166,7 @@ resource "aws_iam_policy" "airflow_lambda_policy" {
         Effect = "Allow"
         Action = "lambda:InvokeFunction"
         Resource = [
-          "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:quito-gtfs-ingestion",
+          "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:quito-network-ingestion",
           "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:quito-weather-ingestion"
         ]
       }
@@ -188,7 +188,7 @@ resource "aws_iam_policy" "airflow_glue_policy" {
           "glue:GetJobRun"
         ]
         Resource = [
-          "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:job/quito-transport-clean-trips",
+          "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:job/quito-transport-clean-network",
           "arn:aws:glue:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:job/quito-transport-enrich-weather"
         ]
       }

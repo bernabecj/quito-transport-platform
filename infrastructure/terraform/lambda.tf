@@ -23,9 +23,9 @@ data "aws_secretsmanager_secret_version" "openweather" {
 # Lambda Functions
 # ──────────────────────────────────────────────
 
-resource "aws_lambda_function" "gtfs_ingestion" {
-  function_name = "quito-gtfs-ingestion"
-  description   = "Ingests GTFS transit data into the S3 raw prefix"
+resource "aws_lambda_function" "network_ingestion" {
+  function_name = "quito-network-ingestion"
+  description   = "Ingests the OSM transit network into the S3 raw prefix"
   package_type  = "Image"
   image_uri     = "${aws_ecr_repository.ingestion.repository_url}@${data.aws_ecr_image.ingestion_latest.image_digest}"
   role          = data.aws_iam_role.lambda_ingestion.arn
@@ -33,7 +33,7 @@ resource "aws_lambda_function" "gtfs_ingestion" {
   memory_size   = 512
 
   image_config {
-    command = ["ingestion.gtfs_loader.handler"]
+    command = ["ingestion.network_loader.handler"]
   }
 
   tags = {
@@ -71,9 +71,9 @@ resource "aws_lambda_function" "weather_ingestion" {
 # CloudWatch Event Rules (daily at 05:00 UTC)
 # ──────────────────────────────────────────────
 
-resource "aws_cloudwatch_event_rule" "gtfs_schedule" {
-  name                = "${var.project_name}-gtfs-daily"
-  description         = "Trigger quito-gtfs-ingestion Lambda daily at 05:00 UTC"
+resource "aws_cloudwatch_event_rule" "network_schedule" {
+  name                = "${var.project_name}-network-daily"
+  description         = "Trigger quito-network-ingestion Lambda daily at 05:00 UTC"
   schedule_expression = "cron(0 5 * * ? *)"
 
   tags = {
@@ -97,10 +97,10 @@ resource "aws_cloudwatch_event_rule" "weather_schedule" {
 # CloudWatch Event Targets
 # ──────────────────────────────────────────────
 
-resource "aws_cloudwatch_event_target" "gtfs_target" {
-  rule      = aws_cloudwatch_event_rule.gtfs_schedule.name
-  target_id = "quito-gtfs-ingestion-target"
-  arn       = aws_lambda_function.gtfs_ingestion.arn
+resource "aws_cloudwatch_event_target" "network_target" {
+  rule      = aws_cloudwatch_event_rule.network_schedule.name
+  target_id = "quito-network-ingestion-target"
+  arn       = aws_lambda_function.network_ingestion.arn
 }
 
 resource "aws_cloudwatch_event_target" "weather_target" {
@@ -113,12 +113,12 @@ resource "aws_cloudwatch_event_target" "weather_target" {
 # Lambda Permissions for EventBridge (CloudWatch Events)
 # ──────────────────────────────────────────────
 
-resource "aws_lambda_permission" "allow_eventbridge_gtfs" {
-  statement_id  = "AllowExecutionFromEventBridgeGTFS"
+resource "aws_lambda_permission" "allow_eventbridge_network" {
+  statement_id  = "AllowExecutionFromEventBridgeNetwork"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.gtfs_ingestion.function_name
+  function_name = aws_lambda_function.network_ingestion.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = aws_cloudwatch_event_rule.gtfs_schedule.arn
+  source_arn    = aws_cloudwatch_event_rule.network_schedule.arn
 }
 
 resource "aws_lambda_permission" "allow_eventbridge_weather" {

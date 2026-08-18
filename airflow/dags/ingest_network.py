@@ -1,7 +1,8 @@
 """
-DAG: ingest_gtfs
-Triggers the Lambda that pulls the latest Quito GTFS static feed
-(routes, stops, trips, stop_times) and lands Parquet in the S3 raw zone.
+DAG: ingest_network
+Triggers the Lambda that queries the OpenStreetMap Overpass API for Quito's
+transit network (routes, stops, route_stops) and lands Parquet in the S3 raw
+zone as a dated snapshot.
 
 Schedule : daily at 05:00 UTC
 Retries  : 2 × 5-min backoff
@@ -19,7 +20,7 @@ from airflow.providers.amazon.aws.operators.lambda_function import (
 from callbacks import alert_cloudwatch
 
 AWS_CONN_ID = "aws_default"
-LAMBDA_FUNCTION = "quito-gtfs-ingestion"
+LAMBDA_FUNCTION = "quito-network-ingestion"
 
 DEFAULT_ARGS = {
     "owner": "quito-transport",
@@ -30,16 +31,16 @@ DEFAULT_ARGS = {
 }
 
 with DAG(
-    dag_id="ingest_gtfs",
-    description="Fetch Quito GTFS feed → S3 raw zone Parquet",
+    dag_id="ingest_network",
+    description="Fetch Quito transit network from OpenStreetMap → S3 raw zone Parquet",
     schedule_interval="0 5 * * *",
     start_date=datetime(2024, 1, 1),
     catchup=False,
     default_args=DEFAULT_ARGS,
-    tags=["ingestion", "gtfs"],
+    tags=["ingestion", "network", "osm"],
 ) as dag:
     LambdaInvokeFunctionOperator(
-        task_id="invoke_gtfs_lambda",
+        task_id="invoke_network_lambda",
         function_name=LAMBDA_FUNCTION,
         payload=json.dumps({}),
         aws_conn_id=AWS_CONN_ID,
