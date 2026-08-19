@@ -45,7 +45,7 @@ models:
           - not_null
           - unique
       - name: shelter
-        description: "Whether the stop has a shelter, per OSM tagging. Drives the rider-exposure analysis."
+        description: "Whether the stop has a shelter, per OSM tagging. Populated for only ~1% of stops, so it is carried through for completeness but not used in any metric."
 
   - name: dim_weather_conditions
     description: "OpenWeather condition code lookup table."

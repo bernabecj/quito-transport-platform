@@ -27,10 +27,15 @@ resource "aws_lambda_function" "network_ingestion" {
   function_name = "quito-network-ingestion"
   description   = "Ingests the OSM transit network into the S3 raw prefix"
   package_type  = "Image"
-  image_uri     = "${aws_ecr_repository.ingestion.repository_url}@${data.aws_ecr_image.ingestion_latest.image_digest}"
-  role          = data.aws_iam_role.lambda_ingestion.arn
-  timeout       = 300
-  memory_size   = 512
+  image_uri = "${aws_ecr_repository.ingestion.repository_url}@${data.aws_ecr_image.ingestion_latest.image_digest}"
+  role      = data.aws_iam_role.lambda_ingestion.arn
+
+  # Overpass is a free shared service that frequently answers 429/500/504. The
+  # loader retries across two endpoints with backoff, and this timeout must
+  # exceed that worst case (~750s) or the retries get cut off mid-flight.
+  # A healthy run finishes in well under a minute; Lambda bills actual duration.
+  timeout     = 900
+  memory_size = 512
 
   image_config {
     command = ["ingestion.network_loader.handler"]

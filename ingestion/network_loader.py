@@ -20,8 +20,10 @@ Scope note
 """
 
 import io
+import logging
 import time
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 import boto3
 import pandas as pd
@@ -32,6 +34,8 @@ import requests
 from ingestion.constants import (
     OSM_ROUTE_TYPES,
     OVERPASS_BACKOFF_SECONDS,
+    OVERPASS_HEADERS,
+    OVERPASS_HTTP_TIMEOUT,
     OVERPASS_MAX_ATTEMPTS,
     OVERPASS_TIMEOUT,
     OVERPASS_URLS,
@@ -39,6 +43,9 @@ from ingestion.constants import (
     S3_BUCKET_NAME,
     S3_NETWORK_PREFIX,
 )
+
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 # PTv2 tags stop members with these roles; ways carry the road geometry and
 # are skipped — only nodes represent boardable points.
@@ -86,30 +93,44 @@ def fetch_network() -> dict:
     trusted, and each round of endpoints is retried with a widening delay.
     """
     query = build_query()
-    last_error = None
+    failures = []
 
-    for attempt in range(OVERPASS_MAX_ATTEMPTS):
-        if attempt:
-            time.sleep(OVERPASS_BACKOFF_SECONDS * 2 ** (attempt - 1))
+    for attempt in range(1, OVERPASS_MAX_ATTEMPTS + 1):
+        if attempt > 1:
+            time.sleep(OVERPASS_BACKOFF_SECONDS * 2 ** (attempt - 2))
 
         for url in OVERPASS_URLS:
+            host = urlparse(url).netloc
             try:
                 response = requests.post(
-                    url, data={"data": query}, timeout=OVERPASS_TIMEOUT + 30
+                    url,
+                    data={"data": query},
+                    headers=OVERPASS_HEADERS,
+                    timeout=OVERPASS_HTTP_TIMEOUT,
                 )
                 response.raise_for_status()
                 payload = response.json()
             except (requests.RequestException, ValueError) as exc:
-                last_error = exc
+                # Every endpoint's error is kept: reporting only the last one
+                # hides which endpoint actually refused and why.
+                reason = f"attempt {attempt} {host}: {type(exc).__name__}: {exc}"
+                logger.warning(reason)
+                failures.append(reason)
                 continue
 
             if payload.get("elements"):
+                logger.info(
+                    "attempt %s %s: %s elements", attempt, host, len(payload["elements"])
+                )
                 return payload
-            last_error = ValueError(f"{url} returned no elements")
+
+            reason = f"attempt {attempt} {host}: HTTP 200 but no elements"
+            logger.warning(reason)
+            failures.append(reason)
 
     raise RuntimeError(
-        f"Overpass unavailable after {OVERPASS_MAX_ATTEMPTS} attempts; "
-        f"last error: {last_error}"
+        f"Overpass unavailable after {OVERPASS_MAX_ATTEMPTS} attempts. "
+        + " | ".join(failures)
     )
 
 

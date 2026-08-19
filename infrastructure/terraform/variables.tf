@@ -22,14 +22,6 @@ variable "environment" {
   default     = "prod"
 }
 
-variable "redshift_master_password" {
-  description = "Master password for Redshift cluster"
-  type        = string
-  sensitive   = true
-}
-
-variable "redshift_master_username" {
-  description = "Master username for Redshift cluster"
-  type        = string
-  default     = "admin"
-}
+# Redshift credentials are intentionally absent: the cluster lives in a separate
+# AWS account and is reached through the Airflow `redshift_default` connection,
+# so this configuration never needs them. See the note in main.tf.

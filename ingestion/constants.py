@@ -10,11 +10,28 @@ OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter",
 ]
-OVERPASS_TIMEOUT = 180
-# Overpass answers 429/504 when busy; retry the whole endpoint list with a
-# widening delay. Total worst case stays inside the Lambda's 300s timeout.
+# Server-side query budget. A healthy run answers in ~20s, so 90s is generous;
+# keeping it low means a struggling endpoint fails fast and we move to the next
+# one rather than burning the Lambda's whole budget on one hung request.
+OVERPASS_TIMEOUT = 90
+OVERPASS_HTTP_TIMEOUT = OVERPASS_TIMEOUT + 30
+
+# Overpass answers 429/500/504 when busy, and does so often enough that a daily
+# job must be patient. Worst case is
+# OVERPASS_MAX_ATTEMPTS * len(OVERPASS_URLS) * OVERPASS_HTTP_TIMEOUT plus
+# backoff — keep the Lambda timeout above that (see lambda.tf).
 OVERPASS_MAX_ATTEMPTS = 3
-OVERPASS_BACKOFF_SECONDS = 15
+OVERPASS_BACKOFF_SECONDS = 10
+
+# Required, not cosmetic: overpass-api.de rejects the default python-requests
+# User-Agent with HTTP 406 Not Acceptable. Any descriptive agent is accepted,
+# and the OSM usage policy asks callers to identify their application anyway.
+OVERPASS_HEADERS = {
+    "User-Agent": (
+        "quito-transport-platform/1.0 "
+        "(+https://github.com/bernabecj/quito-transport-platform)"
+    )
+}
 
 # (south, west, north, east) — Quito plus the surrounding valleys, wide enough
 # to catch routes that terminate outside the urban core.

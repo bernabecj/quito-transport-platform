@@ -33,13 +33,13 @@ data "aws_secretsmanager_secret" "openweather" {
   name = "quito/openweather"
 }
 
-resource "aws_redshift_cluster" "main" {
-  cluster_identifier  = "${var.project_name}-warehouse"
-  database_name       = "transport"
-  master_username     = var.redshift_master_username
-  master_password     = var.redshift_master_password
-  node_type           = "dc2.large"
-  cluster_type        = "single-node"
-  skip_final_snapshot = true
-  iam_roles           = [aws_iam_role.redshift_role.arn]
-}
+# Redshift is deliberately NOT managed here.
+#
+# The warehouse lives in a separate AWS account on its free tier, so creating a
+# cluster in this account would duplicate it at roughly $180/month for a
+# dc2.large. The pipeline reaches the external cluster through the Airflow
+# `redshift_default` connection instead.
+#
+# aws_iam_role.redshift_role and its S3 read policy remain in iam.tf: they are
+# what the external cluster assumes to COPY from this account's processed
+# prefix, so they are still needed even with no local cluster.

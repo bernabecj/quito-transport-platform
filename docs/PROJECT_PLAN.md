@@ -4,7 +4,7 @@ This is the planning doc for the Quito Transport Platform — the pitch, the day
 build plan, and the interview narrative. For the as-built architecture and setup
 instructions, see the [README](../README.md).
 
-**The idea:** Quito's public transport (Trole, Ecovía, Metrobús, plus dozens of private cooperatives) sprawls across a high-altitude valley, and nobody publishes an answer to basic questions about it — where it reaches, where it doesn't, and how much of it leaves riders standing in the rain. Build a platform that ingests the city's transit network and weather data, processes it, and surfaces coverage, service gaps and rider exposure — publicly accessible so citizens actually use it.
+**The idea:** Quito's public transport (Trole, Ecovía, Metrobús, plus dozens of private cooperatives) sprawls across a high-altitude valley, and nobody publishes an answer to basic questions about it — where it reaches, where it doesn't, and which corridors are saturated while others go unserved. Build a platform that ingests the city's transit network and weather data, processes it, and surfaces coverage and service gaps — publicly accessible so citizens actually use it.
 
 **Why this works for Thoughtworks:**
 
@@ -51,7 +51,7 @@ So the platform analyses **network structure**, not schedule adherence. Every me
 | Orchestration  | **Apache Airflow**     | **Amazon MWAA** or self-hosted on EC2          |
 | Processing     | **PySpark**            | **AWS Glue** or EMR Serverless                 |
 | Transformation | **dbt**                | Runs against Redshift                          |
-| Warehouse      | SQL analytics          | **Amazon Redshift** (free trial)               |
+| Warehouse      | SQL analytics          | **Amazon Redshift** (separate AWS account)     |
 | Data Quality   | **Great Expectations** | Runs in Glue/Airflow, results to S3            |
 | Data Catalog   | Schema & lineage       | **AWS Glue Data Catalog**                      |
 | Visualization  | **Metabase**           | Deployed on **EC2** (t2.micro free tier)       |
@@ -63,12 +63,12 @@ So the platform analyses **network structure**, not schedule adherence. Every me
 
 ## Data Sources (free, public)
 
-- **OpenStreetMap via Overpass API** — transit routes, stops, stop ordering, operator, shelter tags. No credentials required. Rate-limits under load (HTTP 429/504), so the loader cycles two endpoints with exponential backoff.
+- **OpenStreetMap via Overpass API** — transit routes, stops, stop ordering, operator. No credentials required. Rate-limits under load (HTTP 429/504), so the loader cycles two endpoints with exponential backoff.
 - **OpenWeather API** — free tier, current + forecast weather by coordinates.
 
 ### Why ingest daily if the network is near-static?
 
-Each run writes a dated snapshot. Accumulated, those snapshots become a longitudinal record of network change — routes added or withdrawn, stops relocated, shelters appearing. The change history is itself a dataset, and it justifies partitioning the raw zone by `year/month/day`.
+Each run writes a dated snapshot. Accumulated, those snapshots become a longitudinal record of network change — routes added or withdrawn, stops relocated or newly mapped. The change history is itself a dataset, and it justifies partitioning the raw zone by `year/month/day`.
 
 ---
 
@@ -105,11 +105,10 @@ The marts are built to answer these, all from data that exists:
 | Which parts of Quito are within walking distance of a stop? | `stops` coordinates |
 | Where does stop density thin out? | `stops` + `route_stops` |
 | Which corridors carry many redundant routes, and which carry one? | `route_stops` overlap |
-| What share of stops offer shelter, and which routes expose riders most? | `stops.shelter` + `route_stops` |
 | Which operators cover which parts of the city? | `routes.operator` |
 | What has been added or withdrawn since the first snapshot? | dated partitions |
 
-**Planned enhancement — weather joined geographically.** Weather is currently fetched for a single city-centre coordinate. Quito's valley has real microclimate variation, so fetching several points and joining them to stops by proximity would turn "which stops lack shelter" into "which unsheltered stops sit in the rainiest zones". That is a change to `weather_loader.py`, not to the network pipeline.
+**Planned enhancement — weather joined geographically.** Weather is currently fetched for a single city-centre coordinate. Quito's valley has real microclimate variation, so fetching several points and joining them to stops by proximity would let coverage analysis account for local conditions. That is a change to `weather_loader.py`, not to the network pipeline.
 
 ---
 
@@ -248,7 +247,7 @@ Metabase dashboard updates
 **Days 8–9: PySpark processing with AWS Glue**
 
 - Clean and enrich raw snapshots: deduplicate stops shared across routes, validate coordinates, derive zone from lat/lon
-- Compute derived metrics: stop density per zone, route overlap per corridor, shelter coverage per route
+- Compute derived metrics: stop density per zone, route overlap per corridor, operator coverage per zone
 - Output to S3 processed zone as Parquet
 
 **Days 10–11: Great Expectations — data quality gate**
@@ -321,7 +320,7 @@ Metabase dashboard updates
 
 ## What to say in the interview
 
-> "I built a public transport analytics platform for Quito citizens. It ingests the city's transit network from OpenStreetMap and weather from OpenWeather, processes them with PySpark on AWS Glue, validates every batch with Great Expectations before it reaches the warehouse, transforms with dbt on Redshift, and surfaces insights in Metabase — coverage maps, service gaps, and which routes leave riders standing in the rain.
+> "I built a public transport analytics platform for Quito citizens. It ingests the city's transit network from OpenStreetMap and weather from OpenWeather, processes them with PySpark on AWS Glue, validates every batch with Great Expectations before it reaches the warehouse, transforms with dbt on Redshift, and surfaces insights in Metabase — coverage maps, stop density, and route overlap by corridor.
 >
 > The part I'd highlight is how I chose the data source. I started out planning delay analysis from a GTFS feed, but the feed 404'd. Instead of assuming the URL had moved, I checked transit.land and the Mobility Database — 786 and 3,462 feeds respectively, neither with a single Ecuadorian entry. Quito simply doesn't publish GTFS. Digging further, I realised delay analysis needed GTFS-Realtime anyway, since a delay is actual minus scheduled and static GTFS only carries the scheduled half — so the original metric was impossible by construction, not just blocked by a dead link.
 >

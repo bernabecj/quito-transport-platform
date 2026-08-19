@@ -31,15 +31,12 @@ output "glue_enrich_weather_name" {
   value       = aws_glue_job.enrich_weather.name
 }
 
-# Redshift Cluster Outputs
-output "redshift_endpoint" {
-  description = "Endpoint address of the Redshift cluster"
-  value       = aws_redshift_cluster.main.endpoint
-}
+# No Redshift outputs: the warehouse lives in a separate AWS account and is not
+# managed by this configuration. See the note in main.tf.
 
-output "redshift_database" {
-  description = "Name of the default database in the Redshift cluster"
-  value       = aws_redshift_cluster.main.database_name
+output "redshift_load_role_arn" {
+  description = "IAM role the external Redshift cluster assumes to COPY from the processed S3 prefix"
+  value       = aws_iam_role.redshift_role.arn
 }
 
 # Secrets Manager Outputs

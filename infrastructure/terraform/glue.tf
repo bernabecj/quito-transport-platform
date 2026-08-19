@@ -24,10 +24,10 @@ resource "aws_glue_job" "clean_network" {
   }
 
   default_arguments = {
-    "--job-language"                   = "python"
-    "--bucket"                         = data.aws_s3_bucket.main.bucket
+    "--job-language"                     = "python"
+    "--bucket"                           = data.aws_s3_bucket.main.bucket
     "--enable-continuous-cloudwatch-log" = "true"
-    "--enable-metrics"                 = "true"
+    "--enable-metrics"                   = "true"
   }
 }
 
@@ -49,9 +49,9 @@ resource "aws_glue_job" "enrich_weather" {
   }
 
   default_arguments = {
-    "--job-language"                   = "python"
-    "--bucket"                         = data.aws_s3_bucket.main.bucket
+    "--job-language"                     = "python"
+    "--bucket"                           = data.aws_s3_bucket.main.bucket
     "--enable-continuous-cloudwatch-log" = "true"
-    "--enable-metrics"                 = "true"
+    "--enable-metrics"                   = "true"
   }
 }

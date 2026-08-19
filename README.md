@@ -1,6 +1,6 @@
 # Quito Transport Platform
 
-A public data engineering platform that ingests Quito's transit network and weather data, processes it with an AWS-native stack, and surfaces network coverage, service gaps and rider exposure to the elements through a live dashboard.
+A public data engineering platform that ingests Quito's transit network and weather data, processes it with an AWS-native stack, and surfaces network coverage and service gaps through a live dashboard.
 
 ![CI](https://github.com/bernabecj/quito-transport-platform/actions/workflows/ci.yml/badge.svg)
 
@@ -10,7 +10,7 @@ See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the build plan and the inte
 
 ## Why this exists
 
-Quito's public transport serves hundreds of thousands of daily commuters across a city stretched along a high-altitude valley. Which neighbourhoods the network actually reaches, where stops cluster or thin out, and how much of the network leaves riders standing in the rain are all questions nobody publishes an answer to. This platform builds an open, observable pipeline that turns the city's transit topology and weather observations into answerable questions — coverage maps, service-gap analysis, and shelter exposure by route.
+Quito's public transport serves hundreds of thousands of daily commuters across a city stretched along a high-altitude valley. Which neighbourhoods the network actually reaches, where stops cluster or thin out, and which corridors carry redundant routes are all questions nobody publishes an answer to. This platform builds an open, observable pipeline that turns the city's transit topology into answerable questions — coverage maps, stop-density analysis, and route overlap by corridor.
 
 ### A note on data availability
 
@@ -59,7 +59,7 @@ AWS Glue / PySpark    Great Expectations
 | Orchestration  | Apache Airflow         | Amazon MWAA                         |
 | Processing     | PySpark                | AWS Glue / EMR Serverless           |
 | Transformation | dbt                    | Runs against Amazon Redshift        |
-| Warehouse      | SQL analytics          | Amazon Redshift                     |
+| Warehouse      | SQL analytics          | Amazon Redshift (separate AWS account) |
 | Data Quality   | Great Expectations     | Runs in Glue/Airflow, reports to S3 |
 | Data Catalog   | Schema & lineage       | AWS Glue Data Catalog               |
 | Visualization  | Metabase               | EC2 t2.micro (free tier)            |
@@ -73,14 +73,14 @@ AWS Glue / PySpark    Great Expectations
 
 | Source                    | What it provides                                               | Cost |
 | ------------------------- | -------------------------------------------------------------- | ---- |
-| OpenStreetMap (Overpass)  | Transit routes, stops, stop ordering, operator, shelter tags   | Free |
+| OpenStreetMap (Overpass)  | Transit routes, stops, stop ordering, operator                | Free |
 | OpenWeather API           | Current + 5-day forecast for Quito                             | Free tier |
 
 The Overpass API needs no credentials and answers in seconds. It does rate-limit and shed load under contention (HTTP 429/504), so [`ingestion/network_loader.py`](ingestion/network_loader.py) cycles through two endpoints with exponential backoff.
 
 ### Why ingest daily if the network is near-static?
 
-Each run writes a dated snapshot. Over time those snapshots become a longitudinal record of how the network changes — routes added or withdrawn, stops relocated, shelters appearing. That change history is itself a dataset, and it is the reason the raw zone is partitioned by `year/month/day`.
+Each run writes a dated snapshot. Over time those snapshots become a longitudinal record of how the network changes — routes added or withdrawn, stops relocated or newly mapped. That change history is itself a dataset, and it is the reason the raw zone is partitioned by `year/month/day`.
 
 ---
 
@@ -112,10 +112,21 @@ Analytical questions this supports:
 - **Coverage** — which parts of Quito are within walking distance of a stop, and which are not?
 - **Service gaps** — where does stop density thin out relative to population?
 - **Route overlap** — which corridors carry many redundant routes while others carry one?
-- **Rider exposure** — what share of stops have shelter, and which routes leave riders most exposed to rain?
 - **Network change** — what has been added or withdrawn since the first snapshot?
 
 All models and column descriptions live in the dbt docs site (see [Running dbt docs](#running-dbt-docs)).
+
+### Known data limitations
+
+OpenStreetMap is community-mapped, so coverage is uneven. Measured against a real extract on 2026-08-19:
+
+| Observation | Count | Consequence |
+| ----------- | ----- | ----------- |
+| Routes with at least one stop mapped | 119 / 515 | Stop-level analysis covers ~23% of routes; the rest have geometry but no stop nodes |
+| Stops carrying a `shelter` tag | 7 / 485 | Too sparse to support any shelter or weather-exposure metric |
+| Routes with an `operator` tag | 93% | Operator coverage analysis is sound |
+
+Coverage, stop density and route overlap are well supported. Anything depending on `shelter` is not, and is deliberately excluded from the marts rather than reported on thin data.
 
 ---
 
