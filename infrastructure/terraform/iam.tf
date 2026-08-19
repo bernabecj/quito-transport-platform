@@ -53,6 +53,27 @@ resource "aws_iam_policy" "lambda_cloudwatch_policy" {
   })
 }
 
+resource "aws_iam_policy" "lambda_secrets_policy" {
+  name        = "${var.project_name}-lambda-secrets-policy"
+  description = "Allow Lambda to read the OpenWeather API key at runtime"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = data.aws_secretsmanager_secret.openweather.arn
+      }
+    ]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_secrets_attach" {
+  role       = data.aws_iam_role.lambda_ingestion.name
+  policy_arn = aws_iam_policy.lambda_secrets_policy.arn
+}
+
 resource "aws_iam_role_policy_attachment" "lambda_s3_attach" {
   role       = data.aws_iam_role.lambda_ingestion.name
   policy_arn = aws_iam_policy.lambda_s3_policy.arn

@@ -14,10 +14,11 @@ data "aws_ecr_image" "ingestion_latest" {
   image_tag       = "latest"
 }
 
-# weather_loader.py reads the API key directly from this env var at runtime.
-data "aws_secretsmanager_secret_version" "openweather" {
-  secret_id = data.aws_secretsmanager_secret.openweather.id
-}
+# The secret's VALUE is deliberately not read here. An
+# aws_secretsmanager_secret_version data source would resolve the plaintext key
+# into terraform.tfstate and into every plan file — exactly how the key leaked
+# once already. Only the secret's name is passed to the Lambda, which fetches
+# the value itself at runtime (see ingestion/weather_loader.py).
 
 # ──────────────────────────────────────────────
 # Lambda Functions
@@ -27,8 +28,8 @@ resource "aws_lambda_function" "network_ingestion" {
   function_name = "quito-network-ingestion"
   description   = "Ingests the OSM transit network into the S3 raw prefix"
   package_type  = "Image"
-  image_uri = "${aws_ecr_repository.ingestion.repository_url}@${data.aws_ecr_image.ingestion_latest.image_digest}"
-  role      = data.aws_iam_role.lambda_ingestion.arn
+  image_uri     = "${aws_ecr_repository.ingestion.repository_url}@${data.aws_ecr_image.ingestion_latest.image_digest}"
+  role          = data.aws_iam_role.lambda_ingestion.arn
 
   # Overpass is a free shared service that frequently answers 429/500/504. The
   # loader retries across two endpoints with backoff, and this timeout must
@@ -62,7 +63,7 @@ resource "aws_lambda_function" "weather_ingestion" {
 
   environment {
     variables = {
-      OPENWEATHER_API_KEY = jsondecode(data.aws_secretsmanager_secret_version.openweather.secret_string)["OPENWEATHER_API_KEY"]
+      OPENWEATHER_SECRET_NAME = data.aws_secretsmanager_secret.openweather.name
     }
   }
 

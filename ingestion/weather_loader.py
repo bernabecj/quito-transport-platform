@@ -3,10 +3,19 @@ Weather Loader
 Calls the OpenWeather API (current + 5-day forecast) for Quito's bounding
 box, normalises the response, and writes Parquet to
 s3://quito-transport-raw/weather/year=.../month=.../day=...
+
+Secret handling
+  The API key is read from Secrets Manager at runtime, never injected as a
+  Terraform-managed environment variable. Resolving it in Terraform would write
+  the plaintext key into terraform.tfstate (and into any plan file), which
+  defeats the point of storing it in Secrets Manager at all. Terraform passes
+  only the secret's *name*; this module fetches the value.
 """
 
 import io
+import json
 import os
+import re
 from datetime import datetime, timezone
 
 import boto3
@@ -18,6 +27,7 @@ from dotenv import load_dotenv
 
 from ingestion.constants import (
     OPENWEATHER_BASE_URL,
+    OPENWEATHER_SECRET_KEY,
     QUITO_LAT,
     QUITO_LON,
     S3_WEATHER_PREFIX,
@@ -27,9 +37,56 @@ from ingestion.constants import (
 load_dotenv()
 
 
+def get_api_key() -> str:
+    """Resolve the OpenWeather key.
+
+    In Lambda, OPENWEATHER_SECRET_NAME points at the Secrets Manager entry and
+    the value is fetched on each cold start. Locally, the key comes from .env
+    so development needs no AWS access.
+    """
+    secret_name = os.environ.get("OPENWEATHER_SECRET_NAME")
+    if secret_name:
+        response = boto3.client("secretsmanager").get_secret_value(
+            SecretId=secret_name
+        )
+        return json.loads(response["SecretString"])[OPENWEATHER_SECRET_KEY]
+
+    try:
+        return os.environ[OPENWEATHER_SECRET_KEY]
+    except KeyError:
+        raise RuntimeError(
+            f"No credentials: set OPENWEATHER_SECRET_NAME (Lambda) or "
+            f"{OPENWEATHER_SECRET_KEY} (local .env)."
+        ) from None
+
+
+def _get(path: str, api_key: str) -> dict:
+    """GET an OpenWeather endpoint, keeping the key out of any error text.
+
+    OpenWeather takes the key as the `appid` query parameter, so requests'
+    exception messages embed it in the URL — and those messages land in
+    CloudWatch. Errors are re-raised with the key redacted.
+    """
+    response = requests.get(
+        f"{OPENWEATHER_BASE_URL}/{path}",
+        params={"lat": QUITO_LAT, "lon": QUITO_LON, "appid": api_key, "units": "metric"},
+        timeout=10,
+    )
+    try:
+        response.raise_for_status()
+    except requests.HTTPError as exc:
+        # `from None` matters: chaining would re-expose the unredacted original.
+        raise requests.HTTPError(_redact(str(exc))) from None
+    return response.json()
+
+
+def _redact(message: str) -> str:
+    return re.sub(r"(appid=)[^&\s]+", r"\1<redacted>", message)
+
+
 def handler(event, context):
     """Lambda entry point."""
-    api_key = os.environ["OPENWEATHER_API_KEY"]
+    api_key = get_api_key()
     bucket = S3_BUCKET_NAME
     now = datetime.now(timezone.utc)
 
@@ -48,23 +105,11 @@ def handler(event, context):
 
 
 def fetch_current(api_key: str) -> dict:
-    response = requests.get(
-        f"{OPENWEATHER_BASE_URL}/weather",
-        params={"lat": QUITO_LAT, "lon": QUITO_LON, "appid": api_key, "units": "metric"},
-        timeout=10,
-    )
-    response.raise_for_status()
-    return response.json()
+    return _get("weather", api_key)
 
 
 def fetch_forecast(api_key: str) -> dict:
-    response = requests.get(
-        f"{OPENWEATHER_BASE_URL}/forecast",
-        params={"lat": QUITO_LAT, "lon": QUITO_LON, "appid": api_key, "units": "metric"},
-        timeout=10,
-    )
-    response.raise_for_status()
-    return response.json()
+    return _get("forecast", api_key)
 
 
 def normalize_current(data: dict, fetched_at: datetime) -> pd.DataFrame:

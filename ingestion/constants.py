@@ -2,6 +2,8 @@ QUITO_LAT = -0.1807
 QUITO_LON = -78.4678
 
 OPENWEATHER_BASE_URL = "https://api.openweathermap.org/data/2.5"
+# JSON field inside the Secrets Manager entry, and the env var name used locally.
+OPENWEATHER_SECRET_KEY = "OPENWEATHER_API_KEY"
 
 # OpenStreetMap Overpass API — the transit network source. Quito publishes no
 # GTFS feed, so route topology comes from OSM instead. The mirror is a fallback:
