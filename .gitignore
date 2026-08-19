@@ -41,10 +41,15 @@ Thumbs.db
 airflow/logs/
 
 # Terraform
+# Plan files are ZIP archives containing a full copy of state, so they carry the
+# same plaintext secrets state does. Never commit them.
 infrastructure/terraform/.terraform/
 infrastructure/terraform/*.tfstate
 infrastructure/terraform/*.tfstate.backup
 infrastructure/terraform/.terraform.tfstate.lock.info
+*.tfplan
+*.tfvars
+!*.tfvars.example
 
 # Astro / local Airflow
 airflow/.env
