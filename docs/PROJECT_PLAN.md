@@ -4,7 +4,7 @@ This is the planning doc for the Quito Transport Platform — the pitch, the day
 build plan, and the interview narrative. For the as-built architecture and setup
 instructions, see the [README](../README.md).
 
-**The idea:** Quito's public transport (Trole, Ecovía, Metrobús, plus dozens of private cooperatives) sprawls across a high-altitude valley, and nobody publishes an answer to basic questions about it — where it reaches, where it doesn't, and which corridors are saturated while others go unserved. Build a platform that ingests the city's transit network and weather data, processes it, and surfaces coverage and service gaps — publicly accessible so citizens actually use it.
+**The idea:** Quito's public transport (Trole, Ecovía, Metrobús, plus dozens of private cooperatives) is notoriously unpredictable, and nobody publishes an answer to basic questions about it — where it reaches, when it slows down, and which corridors are worst. Build a platform that ingests the city's transit network, corridor travel times and weather, processes it, and surfaces coverage, peak hours and the least predictable routes — publicly accessible so citizens actually use it.
 
 **Why this works for Thoughtworks:**
 
@@ -15,7 +15,7 @@ instructions, see the [README](../README.md).
 
 ---
 
-## Scope decision: why network analysis, not delay analysis
+## Scope decision: measured congestion, not schedule adherence
 
 This plan originally targeted **delay analysis** from a GTFS schedule feed. That target was not achievable, and the investigation behind the pivot is part of the project's story rather than an embarrassment to hide.
 
@@ -33,6 +33,18 @@ This plan originally targeted **delay analysis** from a GTFS schedule feed. That
 
 1. **Quito publishes no GTFS feed.** Not a moved URL — the data is not public in that format.
 2. **Delay analysis needed GTFS-Realtime regardless.** A delay is actual departure minus scheduled departure. Static GTFS carries only the scheduled half. The original metric was unachievable even with a working feed, so the pivot corrects a design flaw rather than merely working around a dead link.
+
+### Recovering the original idea
+
+Deviation from a timetable is unmeasurable, but the *premise* — that Quito's transport is unpredictable — is really about traffic congestion, and that is measurable. Combining the OSM route geometry the pipeline already ingests with a traffic-aware routing API gives observed travel time per corridor. Sampled hourly, it yields exactly what the pitch asked for:
+
+| Original metric | Reframed as | Status |
+| --------------- | ----------- | ------ |
+| Delay vs schedule | Travel time vs the corridor's own historical median | Measurable |
+| Peak hours | When corridor travel time rises above that median | Measurable |
+| Worst routes | Largest peak-to-off-peak spread, and highest variance | Measurable |
+
+Provider selection was itself verified rather than assumed. TomTom publishes no Ecuador coverage for either Traffic Flow or Traffic Stats (it serves AR, BR, CL, CO, PE, UY only); Google's terms forbid storing results, which rules out building a historical dataset; Waze's speed data requires a government partnership. Mapbox was the only candidate, and its `driving-traffic` profile *silently* degrades to free-flow estimates where it lacks coverage, so [`scripts/verify_mapbox_traffic.py`](../scripts/verify_mapbox_traffic.py) checks the per-segment congestion annotations before any code depends on it. Measured 2026-08-19: 49-71% of segments carry real observations.
 
 **The replacement source** is OpenStreetMap via the Overpass API: 515 route relations across Quito, with 93–99% completeness on `operator`, `ref`, `from` and `to`, covering Trole, Ecovía, Metrobús and the private cooperatives. OSM carries **no timetables** — verified directly: 0 of 515 routes have `interval`, `opening_hours`, `frequency` or `departures` tags.
 
@@ -64,6 +76,7 @@ So the platform analyses **network structure**, not schedule adherence. Every me
 ## Data Sources (free, public)
 
 - **OpenStreetMap via Overpass API** — transit routes, stops, stop ordering, operator. No credentials required. Rate-limits under load (HTTP 429/504), so the loader cycles two endpoints with exponential backoff.
+- **Mapbox Directions (`driving-traffic`)** — observed travel time and per-segment congestion for the trunk BRT corridors. Free tier of 100,000 requests/month. Sampling runs hourly in a **fixed two-week window from 2026-08-20** (~4,700 requests), driven by EventBridge so it survives the laptop being closed. It cannot be backfilled — Mapbox reports current conditions only — so the window is collected unattended and then switched off via `TRAFFIC_SAMPLING_ENABLED`.
 - **OpenWeather API** — free tier, current + forecast weather by coordinates.
 
 ### Why ingest daily if the network is near-static?
@@ -107,6 +120,9 @@ The marts are built to answer these, all from data that exists:
 | Which corridors carry many redundant routes, and which carry one? | `route_stops` overlap |
 | Which operators cover which parts of the city? | `routes.operator` |
 | What has been added or withdrawn since the first snapshot? | dated partitions |
+| When does a corridor slow down during the day? | `corridor_travel_time` accumulated over days |
+| Which corridors have the worst peak-to-off-peak spread? | `corridor_travel_time` accumulated over days |
+| Which corridors are least predictable? | variance of `duration_seconds` per corridor |
 
 **Planned enhancement — weather joined geographically.** Weather is currently fetched for a single city-centre coordinate. Quito's valley has real microclimate variation, so fetching several points and joining them to stops by proximity would let coverage analysis account for local conditions. That is a change to `weather_loader.py`, not to the network pipeline.
 
@@ -320,8 +336,12 @@ Metabase dashboard updates
 
 ## What to say in the interview
 
-> "I built a public transport analytics platform for Quito citizens. It ingests the city's transit network from OpenStreetMap and weather from OpenWeather, processes them with PySpark on AWS Glue, validates every batch with Great Expectations before it reaches the warehouse, transforms with dbt on Redshift, and surfaces insights in Metabase — coverage maps, stop density, and route overlap by corridor.
+> "I built a public transport analytics platform for Quito citizens. It ingests the city's transit network from OpenStreetMap, samples corridor travel times from Mapbox, and pulls weather from OpenWeather; processes them with PySpark on AWS Glue, validates every batch with Great Expectations before it reaches the warehouse, transforms with dbt on Redshift, and surfaces insights in Metabase — coverage maps, peak hours, and the city's least predictable corridors.
 >
 > The part I'd highlight is how I chose the data source. I started out planning delay analysis from a GTFS feed, but the feed 404'd. Instead of assuming the URL had moved, I checked transit.land and the Mobility Database — 786 and 3,462 feeds respectively, neither with a single Ecuadorian entry. Quito simply doesn't publish GTFS. Digging further, I realised delay analysis needed GTFS-Realtime anyway, since a delay is actual minus scheduled and static GTFS only carries the scheduled half — so the original metric was impossible by construction, not just blocked by a dead link.
 >
-> So I pivoted to OpenStreetMap, which has 515 well-tagged Quito routes, and rebuilt the marts around questions that data can actually answer. I verified OSM had no timetables before committing — 0 of 515 routes carry frequency tags — so I didn't repeat the same mistake. The governance layer covers Glue Data Catalog for schema registration, dbt docs as a living data dictionary, IAM for access control, and documented retention, PII and ODbL attribution policies. Everything ships through GitHub Actions."
+> So I pivoted to OpenStreetMap, which has 515 well-tagged Quito routes, and verified it had no timetables before committing — 0 of 515 carry frequency tags — so I didn't repeat the same mistake.
+>
+> Then I recovered the original goal from a different angle. The unpredictability people complain about is really traffic, so instead of schedule adherence I measure observed travel time along each corridor and compare it against its own history. That needed a traffic provider, and I checked coverage rather than assuming it: TomTom doesn't cover Ecuador at all, Google's terms forbid storing results, and Mapbox silently falls back to free-flow estimates where it has no data — which would have produced months of meaningless numbers. I wrote a throwaway script to read Mapbox's per-segment congestion annotations and confirmed real coverage before writing any ingestion.
+>
+> The pipeline also taught me to distrust the source data. Four Ecovía routes list their stops out of geographic order in OSM — consecutive 'stops' up to 16 km apart — which made the routing engine trace a zigzag across the city and inflate one corridor from 19 km to 67 km. I added a quality gate on mean stop spacing that excludes them, because a wrong number that looks plausible is worse than a missing one. The governance layer covers Glue Data Catalog for schema registration, dbt docs as a living data dictionary, IAM for access control, and documented retention, PII and ODbL attribution policies. Everything ships through GitHub Actions."

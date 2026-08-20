@@ -12,6 +12,8 @@ sources:
         description: "Raw bridge records linking routes to the stops they serve, in order."
       - name: weather
         description: "Raw OpenWeather API responses for Quito coordinates."
+      - name: corridor_travel_time
+        description: "Raw Mapbox driving-traffic samples: observed travel time per trunk BRT corridor, one row per corridor per sample."
 
 models:
   - name: stg_routes
@@ -37,5 +39,21 @@ models:
     columns:
       - name: observed_at
         description: "Timestamp of the weather observation (UTC-5)."
+        tests:
+          - not_null
+
+  - name: stg_corridor_travel_time
+    description: "Cleaned corridor travel-time samples with local time buckets."
+    columns:
+      - name: route_id
+        description: "Foreign key to dim_routes."
+        tests:
+          - not_null
+      - name: sampled_at
+        description: "UTC timestamp of the sample."
+        tests:
+          - not_null
+      - name: duration_seconds
+        description: "Observed traversal time for the whole corridor."
         tests:
           - not_null

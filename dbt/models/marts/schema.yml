@@ -54,3 +54,28 @@ models:
         tests:
           - not_null
           - unique
+
+  - name: fct_corridor_travel_time
+    description: "Fact table — observed travel time per trunk BRT corridor per sample. Grain is route_id x sampled_at."
+    columns:
+      - name: route_id
+        description: "Foreign key to dim_routes."
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_routes')
+              field: route_id
+      - name: sampled_at
+        description: "UTC timestamp of the sample."
+        tests:
+          - not_null
+      - name: local_hour
+        description: "Hour of day in Quito time (UTC-5). The grouping key for peak-hour analysis."
+      - name: duration_seconds
+        description: "Observed traversal time. Baselines are derived from each corridor's own history rather than a free-flow profile, which measured faster than live traffic and would report negative delay."
+      - name: mean_speed_kmh
+        description: "Corridor distance divided by observed duration."
+      - name: congestion_known_pct
+        description: "Share of route segments where Mapbox reported real congestion rather than 'unknown'. Ranged 27-78% at capture; low values mean the sample rests on sparse observation."
+      - name: mean_hop_km
+        description: "Average distance between consecutive stops. Corridors above 1 km are excluded at ingestion as having non-geographic member order in OSM."

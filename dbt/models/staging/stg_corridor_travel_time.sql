@@ -1,0 +1,4 @@
+-- Staging model for raw Mapbox corridor travel-time samples.
+-- Casts types, derives local hour/weekday buckets, and drops samples whose
+-- congestion coverage is too thin to trust.
+-- TODO: implement transformation logic

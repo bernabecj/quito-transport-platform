@@ -1,6 +1,6 @@
 # Quito Transport Platform
 
-A public data engineering platform that ingests Quito's transit network and weather data, processes it with an AWS-native stack, and surfaces network coverage and service gaps through a live dashboard.
+A public data engineering platform that ingests Quito's transit network, corridor travel times and weather, processes it with an AWS-native stack, and surfaces network coverage, peak hours and the city's least predictable routes through a live dashboard.
 
 ![CI](https://github.com/bernabecj/quito-transport-platform/actions/workflows/ci.yml/badge.svg)
 
@@ -74,9 +74,12 @@ AWS Glue / PySpark    Great Expectations
 | Source                    | What it provides                                               | Cost |
 | ------------------------- | -------------------------------------------------------------- | ---- |
 | OpenStreetMap (Overpass)  | Transit routes, stops, stop ordering, operator                | Free |
+| Mapbox Directions         | Observed travel time and congestion per BRT corridor           | Free tier (100k/mo) |
 | OpenWeather API           | Current + 5-day forecast for Quito                             | Free tier |
 
 The Overpass API needs no credentials and answers in seconds. It does rate-limit and shed load under contention (HTTP 429/504), so [`ingestion/network_loader.py`](ingestion/network_loader.py) cycles through two endpoints with exponential backoff.
+
+Mapbox is the only one of these that is metered. Coverage for Quito was verified before committing to it — see [`scripts/verify_mapbox_traffic.py`](scripts/verify_mapbox_traffic.py), which confirmed real congestion data on 49-71% of segments across the trunk corridors rather than the silent free-flow fallback Mapbox returns for uncovered regions. **Traffic sampling is disabled by default**; see [Corridor travel time](#corridor-travel-time-disabled-by-default).
 
 ### Why ingest daily if the network is near-static?
 
@@ -96,14 +99,22 @@ The ingestion Lambda produces three tables per snapshot:
 
 `stop_sequence` is the stop's position along the route. It is **not** a timetable ordering — there are no times in this data.
 
+The traffic sampler adds a fourth, written once per run rather than per day:
+
+| Dataset                | Grain                        | Key columns                                                     |
+| ---------------------- | ---------------------------- | --------------------------------------------------------------- |
+| `corridor_travel_time` | one row per corridor per sample | `route_id`, `sampled_at`, `local_hour`, `duration_seconds`, `mean_speed_kmh`, `congestion_*` |
+
+Real samples of every dataset are committed under [`data/samples/`](data/samples/) so the Glue and dbt layers can be built without calling any API.
+
 ---
 
 ## Data Model (Star Schema)
 
 ```
-fct_route_stops                      fct_daily_weather
- ├── route_id  → dim_routes           └── condition_id → dim_weather_conditions
- ├── stop_id   → dim_stops
+fct_route_stops                 fct_corridor_travel_time      fct_daily_weather
+ ├── route_id → dim_routes       ├── route_id → dim_routes      └── condition_id
+ ├── stop_id  → dim_stops        └── sampled_at                      → dim_weather_conditions
  └── snapshot_date
 ```
 
@@ -113,6 +124,11 @@ Analytical questions this supports:
 - **Service gaps** — where does stop density thin out relative to population?
 - **Route overlap** — which corridors carry many redundant routes while others carry one?
 - **Network change** — what has been added or withdrawn since the first snapshot?
+- **Peak hours** — when does a corridor's travel time rise above its own daily median?
+- **Worst corridors** — which routes show the largest peak-to-off-peak spread?
+- **Unpredictability** — which corridors vary most in travel time, which is closer to what riders actually experience than an average?
+
+The last three need accumulated samples. A single snapshot cannot express them, because every one compares a corridor against its own history.
 
 All models and column descriptions live in the dbt docs site (see [Running dbt docs](#running-dbt-docs)).
 
@@ -125,8 +141,35 @@ OpenStreetMap is community-mapped, so coverage is uneven. Measured against a rea
 | Routes with at least one stop mapped | 119 / 515 | Stop-level analysis covers ~23% of routes; the rest have geometry but no stop nodes |
 | Stops carrying a `shelter` tag | 7 / 485 | Too sparse to support any shelter or weather-exposure metric |
 | Routes with an `operator` tag | 93% | Operator coverage analysis is sound |
+| Trunk corridors with usable stop order | 14 / 18 | Four Ecovía relations list stops non-geographically (consecutive "stops" up to 15.9 km apart), so they are excluded from travel-time sampling |
 
 Coverage, stop density and route overlap are well supported. Anything depending on `shelter` is not, and is deliberately excluded from the marts rather than reported on thin data.
+
+---
+
+### Corridor travel time — collection window
+
+Sampling is **live from 2026-08-20 for two weeks**. An hourly EventBridge rule
+(`quito-transport-traffic-hourly`) invokes `quito-traffic-ingestion`, which writes one
+Parquet snapshot per hour to `raw/traffic/year=/month=/day=/hour=`.
+
+Why a fixed window rather than always-on: Mapbox is the one metered source here. Fourteen
+corridors sampled hourly for two weeks is roughly **4,700 requests against a 100,000/month
+free tier** — ample for a daily-and-weekly pattern, and it stops before becoming an
+open-ended dependency.
+
+**To stop collection**, set `TRAFFIC_SAMPLING_ENABLED` to `"false"` on the Lambda in
+[`infrastructure/terraform/lambda.tf`](infrastructure/terraform/lambda.tf) and apply. The
+handler then returns `{"skipped": true}` without spending a request, and the accumulated
+history stays readable.
+
+The `sample_traffic` Airflow DAG stays **paused on purpose**. Local Airflow only runs while
+the dev container is up, so EventBridge — which runs regardless — owns the schedule.
+Unpausing the DAG would double the spend to write the same S3 key twice.
+
+**This history cannot be backfilled.** Mapbox reports current conditions only; there is no
+endpoint for past traffic (that is TomTom Traffic Stats, which does not cover Ecuador). Every
+unsampled hour is permanently lost, which is why the window runs unattended in AWS.
 
 ---
 
@@ -186,10 +229,16 @@ quito-transport-platform/
 │   └── dags/
 │       ├── ingest_network.py       # DAG: pull OSM network → S3 raw
 │       ├── ingest_weather.py       # DAG: pull OpenWeather → S3 raw
+│       ├── sample_traffic.py       # DAG: hourly Mapbox sampling (paused)
 │       └── full_pipeline.py        # DAG: end-to-end orchestration
 ├── ingestion/
 │   ├── network_loader.py           # Query Overpass, normalise to Parquet
+│   ├── traffic_loader.py           # Sample corridor travel time (off by default)
 │   └── weather_loader.py           # Fetch + normalise OpenWeather
+├── data/
+│   └── samples/                    # Real captured data for offline development
+├── scripts/
+│   └── verify_mapbox_traffic.py    # Go/no-go check on Quito traffic coverage
 ├── processing/
 │   └── glue_jobs/
 │       ├── clean_network.py        # PySpark: clean raw network snapshots

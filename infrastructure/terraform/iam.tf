@@ -28,6 +28,20 @@ resource "aws_iam_policy" "lambda_s3_policy" {
           "s3:GetObject"
         ]
         Resource = "${data.aws_s3_bucket.main.arn}/raw/*"
+      },
+      {
+        # traffic_loader lists raw/network/ to find the most recent snapshot to
+        # build corridors from. ListBucket is a bucket-level action, so it
+        # cannot be scoped by object ARN — the prefix condition keeps it from
+        # exposing anything outside the raw zone.
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = data.aws_s3_bucket.main.arn
+        Condition = {
+          StringLike = {
+            "s3:prefix" = ["raw/*"]
+          }
+        }
       }
     ]
   })
@@ -55,15 +69,18 @@ resource "aws_iam_policy" "lambda_cloudwatch_policy" {
 
 resource "aws_iam_policy" "lambda_secrets_policy" {
   name        = "${var.project_name}-lambda-secrets-policy"
-  description = "Allow Lambda to read the OpenWeather API key at runtime"
+  description = "Allow Lambda to read the OpenWeather and Mapbox credentials at runtime"
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Effect   = "Allow"
-        Action   = ["secretsmanager:GetSecretValue"]
-        Resource = data.aws_secretsmanager_secret.openweather.arn
+        Effect = "Allow"
+        Action = ["secretsmanager:GetSecretValue"]
+        Resource = [
+          data.aws_secretsmanager_secret.openweather.arn,
+          data.aws_secretsmanager_secret.mapbox.arn,
+        ]
       }
     ]
   })
@@ -188,7 +205,8 @@ resource "aws_iam_policy" "airflow_lambda_policy" {
         Action = "lambda:InvokeFunction"
         Resource = [
           "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:quito-network-ingestion",
-          "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:quito-weather-ingestion"
+          "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:quito-weather-ingestion",
+          "arn:aws:lambda:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:function:quito-traffic-ingestion"
         ]
       }
     ]

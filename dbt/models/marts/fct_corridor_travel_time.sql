@@ -1,0 +1,5 @@
+-- Fact table: one row per corridor per sample.
+-- Grain is route_id x sampled_at. Peak hours, worst corridors and travel-time
+-- variance are all derived by comparing a corridor against its own history, so
+-- this table is only meaningful once several days of samples have accumulated.
+-- TODO: implement transformation logic
