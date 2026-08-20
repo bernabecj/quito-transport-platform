@@ -1,8 +1,8 @@
 # Project Plan
 
 This is the planning doc for the Quito Transport Platform — the pitch, the day-by-day
-build plan, and the interview narrative. For the as-built architecture and setup
-instructions, see the [README](../README.md).
+build plan, and the roadmap beyond the initial 3-week build. For the as-built architecture
+and setup instructions, see the [README](../README.md).
 
 **The idea:** Quito's public transport (Trole, Ecovía, Metrobús, plus dozens of private cooperatives) is notoriously unpredictable, and nobody publishes an answer to basic questions about it — where it reaches, when it slows down, and which corridors are worst. Build a platform that ingests the city's transit network, corridor travel times and weather, processes it, and surfaces coverage, peak hours and the least predictable routes — publicly accessible so citizens actually use it.
 
@@ -334,14 +334,220 @@ Metabase dashboard updates
 
 ---
 
-## What to say in the interview
+## Roadmap: Real-Time Extension
 
-> "I built a public transport analytics platform for Quito citizens. It ingests the city's transit network from OpenStreetMap, samples corridor travel times from Mapbox, and pulls weather from OpenWeather; processes them with PySpark on AWS Glue, validates every batch with Great Expectations before it reaches the warehouse, transforms with dbt on Redshift, and surfaces insights in Metabase — coverage maps, peak hours, and the city's least predictable corridors.
->
-> The part I'd highlight is how I chose the data source. I started out planning delay analysis from a GTFS feed, but the feed 404'd. Instead of assuming the URL had moved, I checked transit.land and the Mobility Database — 786 and 3,462 feeds respectively, neither with a single Ecuadorian entry. Quito simply doesn't publish GTFS. Digging further, I realised delay analysis needed GTFS-Realtime anyway, since a delay is actual minus scheduled and static GTFS only carries the scheduled half — so the original metric was impossible by construction, not just blocked by a dead link.
->
-> So I pivoted to OpenStreetMap, which has 515 well-tagged Quito routes, and verified it had no timetables before committing — 0 of 515 carry frequency tags — so I didn't repeat the same mistake.
->
-> Then I recovered the original goal from a different angle. The unpredictability people complain about is really traffic, so instead of schedule adherence I measure observed travel time along each corridor and compare it against its own history. That needed a traffic provider, and I checked coverage rather than assuming it: TomTom doesn't cover Ecuador at all, Google's terms forbid storing results, and Mapbox silently falls back to free-flow estimates where it has no data — which would have produced months of meaningless numbers. I wrote a throwaway script to read Mapbox's per-segment congestion annotations and confirmed real coverage before writing any ingestion.
->
-> The pipeline also taught me to distrust the source data. Four Ecovía routes list their stops out of geographic order in OSM — consecutive 'stops' up to 16 km apart — which made the routing engine trace a zigzag across the city and inflate one corridor from 19 km to 67 km. I added a quality gate on mean stop spacing that excludes them, because a wrong number that looks plausible is worse than a missing one. The governance layer covers Glue Data Catalog for schema registration, dbt docs as a living data dictionary, IAM for access control, and documented retention, PII and ODbL attribution policies. Everything ships through GitHub Actions."
+Extending the existing batch platform with a streaming layer, so the same data answers
+both **"what are the historical patterns?"** (the daily batch pipeline — delay trends,
+peak hours, worst corridors, run once at 6am) and **"what is happening right now?"**
+(a citizen at a stop at 8:15am who cannot know their route is currently 20 minutes
+behind).
+
+Adding a streaming layer turns this into a **Lambda architecture** — batch and speed
+layers serving different latency needs from the same underlying data. That is a
+stronger architectural story than either layer alone, and it exercises two areas the
+3-week plan above only touches lightly: real-time processing and data governance /
+masking.
+
+### Data source: extending the verified feed, not inventing one
+
+The [scope decision](#scope-decision-measured-congestion-not-schedule-adherence) above
+already established that Quito publishes **no GTFS feed, static or realtime** — checked
+against transit.land's registry (786 feeds, zero from Ecuador) and the Mobility Database
+catalogue (3,462 feeds, zero from Ecuador). That finding covers GTFS-Realtime as much as
+static GTFS: there is no vehicle-position or trip-update feed to poll, and building this
+extension around one anyway would repeat the exact mistake the scope decision exists to
+avoid.
+
+So this extension does not introduce GTFS-Realtime. It streams the one live signal this
+project has already verified: **Mapbox Directions corridor travel time**, currently
+sampled every six hours by [`ingestion/traffic_loader.py`](../ingestion/traffic_loader.py).
+The streaming layer is the same, already-proven data source polled far more often, feeding
+a low-latency path alongside the existing batch one — not a new, unverified integration.
+
+Two consequences follow, worth stating plainly rather than discovering mid-build:
+
+- **No vehicle-level data exists in this stream.** Mapbox Directions returns a
+  route-level duration and per-segment congestion, not individual vehicle positions.
+  There is no `vehicle_id` to mask. The masking design below is kept because it is good
+  practice to design in advance, but it only becomes load-bearing if a genuine
+  vehicle-position feed is added later (e.g. another city's public GTFS-RT, substituted
+  in and labelled honestly, the same way the [data source options](#target-architecture)
+  below note it as a fallback).
+- **The Mapbox rate limit, not Kinesis throughput, is the real constraint.** Polling all
+  14 trunk corridors every 30s is ~40,000 requests/day — burns the 100k/month free tier
+  in under three days. A realistic polling interval is every 2–5 minutes: still a 70×+
+  improvement on the current 6-hour cadence, and enough to drive a visibly live dashboard
+  without paying for the API.
+
+### Target architecture
+
+```
+Mapbox Directions (corridor travel time, polled every 2-5 min per route)
+        ↓
+   Producer (Lambda, scheduled via EventBridge)
+        ↓
+   Kinesis Data Streams  ← partition key: route_id
+        ↓
+   ┌────────────────────────────────┐
+   │  Spark Structured Streaming    │
+   │  (Glue Streaming job)          │
+   │  - windowed aggregations       │
+   │  - watermark for late events   │
+   │  - checkpointing to S3         │
+   └────────────────────────────────┘
+        ↓                    ↓
+   S3 bronze/realtime     DynamoDB
+   (feeds batch layer)    (current state)
+        ↓                    ↓
+   existing daily DAG    Grafana dashboard
+```
+
+The same stream feeds both the historical lake — landing in the same
+`corridor_travel_time` shape the batch pipeline already writes, just at higher
+frequency — and a low-latency store for the live dashboard. That dual sink is what
+makes this a genuine Lambda architecture rather than two disconnected systems.
+
+If a real vehicle-position feed ever becomes available (Quito starts publishing
+GTFS-Realtime, or another city's feed is substituted in for a clearly-labelled demo),
+it slots into the same Kinesis → Spark → dual-sink shape; only the producer and the
+payload schema change.
+
+### New components
+
+**1. Producer (`streaming/producer/`)**
+
+A Lambda function on an EventBridge schedule (every 2–5 minutes, not 30s — see the rate
+limit note above) that calls Mapbox Directions for each trunk corridor and publishes to
+Kinesis.
+
+Key decisions to document:
+
+- **Partition key = `route_id`.** All events for a corridor land in the same shard,
+  preserving per-route ordering for correct windowed aggregation. Watch for skew: a
+  corridor sampled more often than others becomes a hot shard — the same skew problem
+  already handled in the Glue/PySpark layer, one layer up.
+- **Batching.** `put_records` (plural), not one call per corridor, to keep API calls —
+  and cost — down.
+- **Failure handling.** Kinesis partial failures are normal; `put_records` returns
+  per-record status. Retry only the failed records, not the whole batch.
+
+**2. Stream processor (`streaming/processor/`)**
+
+A Glue Streaming job running Spark Structured Streaming. Aggregations to compute, all
+extensions of metrics the batch layer already produces:
+
+- Average speed per route, 5-minute tumbling window (`mean_speed_kmh`, already sampled)
+- Travel time vs. the corridor's own rolling historical median — the same comparison
+  the batch marts make daily, computed continuously instead
+- Congestion flag when average speed drops below the route-specific threshold
+  (`congestion_*`, already sampled)
+- Sample count per window, as a data-quality signal rather than a "vehicle count" —
+  there are no vehicles in this feed, only route-level samples
+
+Concepts to implement deliberately:
+
+- **Watermark** — accept events up to 10 minutes late, discard beyond that. Without it,
+  Spark retains every open window indefinitely and eventually exhausts memory.
+- **Checkpointing to S3** — stores processed offsets so the job resumes correctly after
+  failure.
+- **Idempotent writes** — overwrite by window + route key rather than appending, so a
+  replay after failure cannot double-count. Same principle already used in the batch
+  layer.
+
+**3. Serving layer**
+
+- **DynamoDB** for current state: key `route_id`, attributes for current average speed,
+  congestion status, last-updated timestamp. Single-digit-millisecond reads, on-demand
+  billing, TTL to auto-expire stale rows.
+- **S3 bronze/realtime** for the raw event archive, date-partitioned Parquet, feeding
+  the existing batch pipeline — the same partitioning strategy (`year/month/day`)
+  already used for the raw zone.
+
+**4. Dashboard**
+
+Grafana for this layer, not Metabase — time-series data with frequent refresh is what
+Grafana is built for, while Metabase stays the right tool for the historical analytical
+dashboards already planned above. That split ("Grafana observes systems, Metabase
+analyzes business") is worth stating explicitly rather than leaving implicit.
+
+Panels: live corridor speed, congestion alerts, current travel time vs. the historical
+median from the batch layer.
+
+### Data masking layer
+
+This is designed in advance for when it becomes load-bearing (see the data-source note
+above — the current Mapbox-based stream carries no vehicle-level identifiers, so none of
+this applies yet). Documented now so it is not an afterthought if a vehicle-position feed
+is added later.
+
+| Technique | Where | Implementation |
+|---|---|---|
+| Hashing | Producer, before publish | SHA-256 of the identifier with a salt from Secrets Manager |
+| Tokenization | Producer | Map real IDs to surrogate tokens, mapping table access-restricted |
+| Column-level access | Redshift | `GRANT SELECT (col1, col2)` — analysts see aggregates, not raw IDs |
+| Aggregation threshold | Processor | Suppress any window with too few underlying samples to prevent re-identification |
+| Retention policy | S3 lifecycle | Raw positional data expires after 30 days; aggregates retained indefinitely |
+
+If this becomes active, the reasoning belongs in `DATA_GOVERNANCE.md`, which would need
+updating either way — it currently states the project holds no personal data at all, a
+claim that is still true for the Mapbox-based stream but would stop being true the moment
+a vehicle-level feed is added. Masking should happen **at ingestion, before data lands**,
+so raw identifiers never persist — masking after storage means the unmasked data already
+existed somewhere.
+
+### Cost control
+
+Non-negotiable, set up before creating any resource:
+
+- AWS Budgets alert at $20 and $50
+- Kinesis **on-demand** mode, not provisioned
+- Glue Streaming charges per DPU-hour while running — **stop the job when not actively
+  developing**
+- DynamoDB on-demand, with TTL enabled
+- A `make stop-all` target that shuts down every billable resource
+
+Realistic monthly cost if disciplined: $15–40. If a Glue job is left running: $200+. The
+difference is entirely operational habit — the same lesson the fixed two-week Mapbox
+sampling window above already applies to the batch layer.
+
+### Repository additions
+
+```
+quito-transport-platform/
+├── streaming/
+│   ├── producer/
+│   │   └── mapbox_stream_producer.py
+│   ├── processor/
+│   │   ├── stream_aggregations.py
+│   │   └── watermark_config.py
+│   └── tests/
+│       └── test_windowing.py
+├── infrastructure/
+│   └── streaming_iam.json
+├── grafana/
+│   └── dashboards/
+└── docs/
+    ├── STREAMING_ARCHITECTURE.md
+    └── LAMBDA_TRADEOFFS.md
+```
+
+### Build sequence
+
+Rough ordering, not a schedule — adapt to available time.
+
+1. **Infrastructure and cost guardrails.** Budgets, IAM roles, Kinesis stream. Verify
+   the alerts fire before proceeding.
+2. **Producer.** Poll Mapbox Directions for the trunk corridors, publish to Kinesis.
+   Success criterion: events visible in the stream.
+3. **Consumer, minimal.** Read the stream, write raw events to S3. No aggregation yet —
+   just prove the read path works.
+4. **Windowed aggregation.** Add tumbling windows, then the watermark, then
+   checkpointing. One at a time, verifying each.
+5. **DynamoDB sink.** Write current state, confirm idempotency by replaying events and
+   checking for duplicates.
+6. **Grafana.** Connect, build panels.
+7. **Documentation.** Architecture diagram, trade-off write-up, README update. Revisit
+   the masking section and `DATA_GOVERNANCE.md` only if a vehicle-level feed has
+   actually been added by this point — otherwise leave them as forward-looking design.
+
+Steps 3–5 are where the real learning happens. Do not rush them.

@@ -4,7 +4,7 @@ A public data engineering platform that ingests Quito's transit network, corrido
 
 ![CI](https://github.com/bernabecj/quito-transport-platform/actions/workflows/ci.yml/badge.svg)
 
-See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the build plan and the interview narrative behind this project.
+See [docs/PROJECT_PLAN.md](docs/PROJECT_PLAN.md) for the build plan and the roadmap beyond it, including a real-time streaming extension.
 
 ---
 
