@@ -76,7 +76,7 @@ So the platform analyses **network structure**, not schedule adherence. Every me
 ## Data Sources (free, public)
 
 - **OpenStreetMap via Overpass API** — transit routes, stops, stop ordering, operator. No credentials required. Rate-limits under load (HTTP 429/504), so the loader cycles two endpoints with exponential backoff.
-- **Mapbox Directions (`driving-traffic`)** — observed travel time and per-segment congestion for the trunk BRT corridors. Free tier of 100,000 requests/month. Sampling runs hourly in a **fixed two-week window from 2026-08-20** (~4,700 requests), driven by EventBridge so it survives the laptop being closed. It cannot be backfilled — Mapbox reports current conditions only — so the window is collected unattended and then switched off via `TRAFFIC_SAMPLING_ENABLED`.
+- **Mapbox Directions (`driving-traffic`)** — observed travel time and per-segment congestion for the trunk BRT corridors. Free tier of 100,000 requests/month. Sampling runs every six hours in a **fixed two-week window from 2026-08-20** (~780 requests), driven by EventBridge so it survives the laptop being closed. It cannot be backfilled — Mapbox reports current conditions only — so the window is collected unattended and then switched off via `TRAFFIC_SAMPLING_ENABLED`.
 - **OpenWeather API** — free tier, current + forecast weather by coordinates.
 
 ### Why ingest daily if the network is near-static?

@@ -117,12 +117,25 @@ resource "aws_lambda_function" "traffic_ingestion" {
   }
 }
 
-# Hourly, not daily: the whole point is resolving how travel time moves across
-# the day, which a daily sample cannot show.
+# Every 6 hours, not daily: a single daily sample cannot show how travel time
+# moves across the day. At 00/06/12/18 UTC these land at 19:00, 01:00, 07:00
+# and 13:00 Quito time (UTC-5) — evening peak, overnight baseline, morning peak
+# and midday. Four points per corridor per day.
+#
+# The trade-off is resolution: this compares four fixed times of day, but cannot
+# locate *when* a peak occurs. Narrowing the interval is a one-line change here
+# and costs little — hourly for the full two weeks would be ~4,700 requests
+# against a 100,000/month free tier.
+#
+# TO STOP COLLECTING: set state = "DISABLED" and apply. That halts invocation
+# entirely, which is cleaner than letting the rule fire into a Lambda that
+# returns {"skipped": true}. TRAFFIC_SAMPLING_ENABLED on the function remains a
+# second, independent guard.
 resource "aws_cloudwatch_event_rule" "traffic_schedule" {
-  name                = "${var.project_name}-traffic-hourly"
-  description         = "Trigger quito-traffic-ingestion every hour during the collection window"
-  schedule_expression = "cron(0 * * * ? *)"
+  name                = "${var.project_name}-traffic-6h"
+  description         = "Trigger quito-traffic-ingestion every 6 hours during the collection window"
+  schedule_expression = "cron(0 0/6 * * ? *)"
+  state               = "ENABLED"
 
   tags = {
     Project     = var.project_name

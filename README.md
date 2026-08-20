@@ -149,19 +149,23 @@ Coverage, stop density and route overlap are well supported. Anything depending 
 
 ### Corridor travel time — collection window
 
-Sampling is **live from 2026-08-20 for two weeks**. An hourly EventBridge rule
-(`quito-transport-traffic-hourly`) invokes `quito-traffic-ingestion`, which writes one
-Parquet snapshot per hour to `raw/traffic/year=/month=/day=/hour=`.
+Sampling is **live from 2026-08-20 for two weeks**. An EventBridge rule
+(`quito-transport-traffic-6h`) invokes `quito-traffic-ingestion` every six hours, writing one
+Parquet snapshot per run to `raw/traffic/year=/month=/day=/hour=`.
+
+At 00/06/12/18 UTC those land at **19:00, 01:00, 07:00 and 13:00 Quito time** — evening peak,
+overnight baseline, morning peak and midday. Four points per corridor per day, enough to
+compare those times against each other, though not to locate exactly when a peak occurs.
 
 Why a fixed window rather than always-on: Mapbox is the one metered source here. Fourteen
-corridors sampled hourly for two weeks is roughly **4,700 requests against a 100,000/month
-free tier** — ample for a daily-and-weekly pattern, and it stops before becoming an
-open-ended dependency.
+corridors every six hours for two weeks is about **780 requests against a 100,000/month free
+tier**, and the window stops before becoming an open-ended dependency.
 
-**To stop collection**, set `TRAFFIC_SAMPLING_ENABLED` to `"false"` on the Lambda in
-[`infrastructure/terraform/lambda.tf`](infrastructure/terraform/lambda.tf) and apply. The
-handler then returns `{"skipped": true}` without spending a request, and the accumulated
-history stays readable.
+**To stop collection**, set `state = "DISABLED"` on `aws_cloudwatch_event_rule.traffic_schedule`
+in [`infrastructure/terraform/lambda.tf`](infrastructure/terraform/lambda.tf) and apply. That
+halts invocation entirely. `TRAFFIC_SAMPLING_ENABLED` on the function is a second, independent
+guard: with it set to `"false"` the handler returns `{"skipped": true}` even if something does
+invoke it. The accumulated history stays in S3 either way.
 
 The `sample_traffic` Airflow DAG stays **paused on purpose**. Local Airflow only runs while
 the dev container is up, so EventBridge — which runs regardless — owns the schedule.
