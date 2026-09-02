@@ -23,8 +23,15 @@ Why there is no free-flow baseline column
   requests: one per corridor per sample instead of two.
 
 Cost
-  18 trunk corridors x 1 request per sample. Hourly for a month is roughly
-  13,000 requests against Mapbox's 100,000/month free tier.
+  14 corridors x 1 request per sample — 18 trunk relations match the pattern,
+  four are dropped by the CORRIDOR_MAX_MEAN_HOP_KM scrambling filter in
+  build_corridors. Sampling hourly for a month is roughly 10,100 requests
+  against Mapbox's 100,000/month free tier.
+
+Partitioning caveat
+  The S3 key below is partitioned to the hour with no minute component, so two
+  runs within the same hour overwrite each other. Sampling faster than hourly
+  requires adding a minute to the key first.
 """
 
 import io

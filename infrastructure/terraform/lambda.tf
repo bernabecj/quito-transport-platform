@@ -106,7 +106,7 @@ resource "aws_lambda_function" "traffic_ingestion" {
 
   environment {
     variables = {
-      TRAFFIC_SAMPLING_ENABLED = "true"
+      TRAFFIC_SAMPLING_ENABLED = "false"
       MAPBOX_SECRET_NAME       = data.aws_secretsmanager_secret.mapbox.name
     }
   }
@@ -117,25 +117,36 @@ resource "aws_lambda_function" "traffic_ingestion" {
   }
 }
 
-# Every 6 hours, not daily: a single daily sample cannot show how travel time
-# moves across the day. At 00/06/12/18 UTC these land at 19:00, 01:00, 07:00
-# and 13:00 Quito time (UTC-5) — evening peak, overnight baseline, morning peak
-# and midday. Four points per corridor per day.
+# Hourly. This ran 6-hourly from 2026-08-20 to 2026-08-24; that cadence proved
+# the congestion signal is real (50%+ peak-to-overnight spread, separating
+# cleanly per corridor) but it only ever samples four times of day — 01/07/13/19
+# Quito time — so it can rank corridors by peak spread yet can never locate
+# *when* a corridor slows down, which is one of the questions the platform is
+# built to answer. More days do not fix that; only a narrower interval does.
 #
-# The trade-off is resolution: this compares four fixed times of day, but cannot
-# locate *when* a peak occurs. Narrowing the interval is a one-line change here
-# and costs little — hourly for the full two weeks would be ~4,700 requests
-# against a 100,000/month free tier.
+# Raising the frequency costs no extra calendar time. Each analysis cell is
+# (corridor x hour x weekday/weekend), so an extra sample per day fills a new
+# hour cell rather than duplicating an existing one: days-to-n-per-cell is the
+# same at 4/day and 24/day, for 6x the resolution over the same window. The
+# 6-hourly samples already collected stay valid and comparable.
+#
+# Cost: 14 corridors x 24/day = ~10,100 requests/month, 10% of Mapbox's
+# 100,000/month free tier (the 6-hourly rule used 1.7%).
+#
+# DO NOT go finer than hourly without changing the S3 key first. traffic_loader
+# writes to .../day=DD/hour=HH/corridor_travel_time.parquet, which has no minute
+# component, so two runs in the same hour overwrite each other and half the data
+# is lost with no error. Sub-hourly sampling needs a minute in that key.
 #
 # TO STOP COLLECTING: set state = "DISABLED" and apply. That halts invocation
 # entirely, which is cleaner than letting the rule fire into a Lambda that
 # returns {"skipped": true}. TRAFFIC_SAMPLING_ENABLED on the function remains a
 # second, independent guard.
 resource "aws_cloudwatch_event_rule" "traffic_schedule" {
-  name                = "${var.project_name}-traffic-6h"
-  description         = "Trigger quito-traffic-ingestion every 6 hours during the collection window"
-  schedule_expression = "cron(0 0/6 * * ? *)"
-  state               = "ENABLED"
+  name                = "${var.project_name}-traffic-hourly"
+  description         = "Trigger quito-traffic-ingestion hourly during the collection window"
+  schedule_expression = "cron(0 * * * ? *)"
+  state               = "DISABLED"
 
   tags = {
     Project     = var.project_name
