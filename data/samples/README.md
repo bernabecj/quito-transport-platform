@@ -15,6 +15,7 @@ Total size is under 200 KB.
 | `network/route_stops.parquet` | 960 | OpenStreetMap via Overpass | 2026-08-19 |
 | `traffic/corridor_travel_time.parquet` | 14 | Mapbox Directions `driving-traffic` | 2026-08-19 ~19:30 local |
 | `traffic/corridor_travel_time_series.parquet` | 2 352 | Mapbox Directions `driving-traffic`, exported from the raw S3 zone | hourly, 2026-08-25 → 2026-08-31 local |
+| `weather/weather.parquet` | 574 | OpenWeather, exported from the raw S3 zone | daily call, 2026-08-20 → 2026-09-02 |
 
 ## The two traffic files are not interchangeable
 
@@ -53,6 +54,26 @@ suspected:
 data supports and what it does not. The evidence behind both points above is in
 [`notebooks/01_exploring.ipynb`](../../notebooks/01_exploring.ipynb), sections 8
 and 9. Read the plan before modelling.
+
+## The weather sample is mostly forecasts
+
+`weather/weather.parquet` holds one API call per day at 05:00 Coordinated
+Universal Time, which is midnight local. Each call wrote one observation plus a
+five day forecast at three hour steps, so the file is 14 rows of
+`record_type = "current"` and 560 rows of `record_type = "forecast"`. Filter on
+`record_type` before treating anything as observed.
+
+Two consequences. Only 14 real observations exist across 14 days, all at
+midnight local, which is not enough for an hourly join. And the forecasts
+recover an hourly series only if you keep the shortest lead forecast per target
+time, which means retaining lead time as a column so the provenance stays
+honest. Section 4 of
+[`notebooks/01_exploring.ipynb`](../../notebooks/01_exploring.ipynb) works this
+through.
+
+Weather has no spatial dimension. It is a single observation point for the
+whole city, so any join to traffic or network data is time only, and nothing
+can be said about weather varying by route or stop.
 
 ## Only 14 of 18 trunk corridors are present
 
