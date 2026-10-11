@@ -176,6 +176,7 @@ resource "aws_cloudwatch_event_rule" "network_schedule" {
   name                = "${var.project_name}-network-daily"
   description         = "Trigger quito-network-ingestion Lambda daily at 05:00 UTC"
   schedule_expression = "cron(0 5 * * ? *)"
+  state               = "DISABLED"
 
   tags = {
     Project     = var.project_name
@@ -187,6 +188,7 @@ resource "aws_cloudwatch_event_rule" "weather_schedule" {
   name                = "${var.project_name}-weather-daily"
   description         = "Trigger quito-weather-ingestion Lambda daily at 05:00 UTC"
   schedule_expression = "cron(0 5 * * ? *)"
+  state               = "DISABLED"
 
   tags = {
     Project     = var.project_name
