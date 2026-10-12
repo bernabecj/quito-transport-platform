@@ -1,8 +1,341 @@
 {
   "expectation_suite_name": "weather_suite",
-  "expectations": [],
+  "data_asset_type": null,
+  "ge_cloud_id": null,
+  "expectations": [
+    {
+      "expectation_type": "expect_table_columns_to_match_set",
+      "kwargs": {
+        "column_set": [
+          "record_type",
+          "fetched_at",
+          "timestamp",
+          "temp_c",
+          "feels_like_c",
+          "humidity_pct",
+          "pressure_hpa",
+          "weather_main",
+          "weather_description",
+          "wind_speed_ms",
+          "wind_deg",
+          "rain_1h_mm",
+          "clouds_pct",
+          "visibility_m"
+        ],
+        "exact_match": false
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Every column `weather_loader.normalize_current` / `normalize_forecast` emits must be present. Extra columns are allowed: exports from the raw zone carry the `year`/`month`/`day` partition keys."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_table_row_count_to_be_between",
+      "kwargs": {
+        "min_value": 41
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "One ingestion window is one `current` observation plus a five-day forecast at three-hour steps (5 x 8 = 40 rows), so a complete window is 41 rows. Each raw-zone file is one window; the committed sample is 14 of them (574 rows)."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_table_row_count_to_be_between",
+      "kwargs": {
+        "min_value": 1,
+        "row_condition": "record_type==\"current\"",
+        "condition_parser": "pandas"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "At least one observed row per window. Without it the window is forecast only, and the `record_type` filter downstream would silently yield nothing observed."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_table_row_count_to_be_between",
+      "kwargs": {
+        "min_value": 40,
+        "row_condition": "record_type==\"forecast\"",
+        "condition_parser": "pandas"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "A full five-day forecast is 40 steps. Fewer means OpenWeather returned a short `list`, which it does without an error status."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "record_type"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "record_type",
+        "value_set": [
+          "current",
+          "forecast"
+        ]
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_distinct_values_to_equal_set",
+      "kwargs": {
+        "column": "record_type",
+        "value_set": [
+          "current",
+          "forecast"
+        ]
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Both halves of the API call landed in the batch."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "timestamp"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "The observation / forecast target time. Everything downstream joins on it, so a null row is unusable."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "timestamp",
+        "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00:00$"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "ISO-8601 in UTC, as written by `datetime.fromtimestamp(dt, tz=timezone.utc).isoformat()`. The staging model shifts this to Quito time (UTC-5); a naive or differently formatted string would shift wrongly rather than fail."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "fetched_at"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "fetched_at",
+        "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00:00$"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Identifies the ingestion window. Keeping it is what lets forecast lead time be derived honestly (data/samples/README.md)."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "temp_c"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "temp_c",
+        "min_value": -10,
+        "max_value": 40
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Quito sits at 2,850 m; its recorded extremes are roughly -2 to 30 C, and the sample spans 6.3-21.2 C. The real purpose of the bound is the unit: if `units=metric` were ever dropped from the request, OpenWeather answers in Kelvin (~280) and this is what notices."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "feels_like_c",
+        "min_value": -15,
+        "max_value": 45
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "humidity_pct",
+        "min_value": 0,
+        "max_value": 100
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "pressure_hpa",
+        "min_value": 950,
+        "max_value": 1050
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "OpenWeather's `main.pressure` is reduced to sea level, so Quito reads ~1010-1020 hPa rather than the ~720 hPa of its altitude. A value near 720 would mean the API started returning station pressure."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "wind_speed_ms",
+        "min_value": 0,
+        "max_value": 40
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "wind_deg",
+        "min_value": 0,
+        "max_value": 360
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "rain_1h_mm",
+        "min_value": 0,
+        "max_value": 200
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Accumulated precipitation, never negative. For `forecast` rows the loader stores the API's 3-hour accumulation under this column name."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "clouds_pct",
+        "min_value": 0,
+        "max_value": 100
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "visibility_m",
+        "min_value": 0,
+        "max_value": 10000
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "OpenWeather caps visibility at 10 km."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "weather_main"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "weather_main",
+        "value_set": [
+          "Thunderstorm",
+          "Drizzle",
+          "Rain",
+          "Snow",
+          "Mist",
+          "Smoke",
+          "Haze",
+          "Dust",
+          "Fog",
+          "Sand",
+          "Ash",
+          "Squall",
+          "Tornado",
+          "Clear",
+          "Clouds"
+        ]
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "OpenWeather's documented condition groups. `dim_weather_conditions` keys on this, so a new or renamed group must be a deliberate change."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "weather_description"
+      },
+      "meta": {}
+    }
+  ],
   "meta": {
     "great_expectations_version": "0.18.x",
-    "description": "Expectations for the raw OpenWeather dataset. Validates coordinate ranges, non-null timestamps, and minimum row counts per ingestion window."
+    "description": "Expectations for the raw OpenWeather dataset (weather.parquet). Validates presence of the columns weather_loader emits, non-null and ISO-8601 UTC timestamps, minimum row counts per ingestion window (one current observation plus 40 forecast steps), the record_type and condition vocabularies, and physical ranges on every measurement. The dataset carries no coordinates — the loader queries one fixed point (QUITO_LAT, QUITO_LON) and does not record it — so there is nothing spatial to validate here; the point itself is pinned in ingestion/constants.py.",
+    "notes": {
+      "format": "markdown",
+      "content": [
+        "Validated by `raw_samples_checkpoint` against `data/samples/weather/weather.parquet`."
+      ]
+    }
   }
 }

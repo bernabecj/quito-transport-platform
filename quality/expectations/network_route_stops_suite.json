@@ -1,0 +1,202 @@
+{
+  "expectation_suite_name": "network_route_stops_suite",
+  "data_asset_type": null,
+  "ge_cloud_id": null,
+  "expectations": [
+    {
+      "expectation_type": "expect_table_columns_to_match_set",
+      "kwargs": {
+        "column_set": [
+          "route_id",
+          "stop_id",
+          "stop_sequence",
+          "member_role",
+          "fetched_at"
+        ],
+        "exact_match": false
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Every column `network_loader._route_stop_records` emits must be present. Extra columns are allowed: exports from the raw zone carry the `year`/`month`/`day` partition keys."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_table_row_count_to_be_between",
+      "kwargs": {
+        "min_value": 600
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "960 route-stop memberships on 2026-08-19, across the 119 routes that have stops mapped. A collapse here with routes intact means the relation members were truncated or the role parsing broke."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "route_id"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "route_id",
+        "regex": "^\\d+$"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "stop_id"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "stop_id",
+        "regex": "^\\d+$"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_unique_value_count_to_be_between",
+      "kwargs": {
+        "column": "stop_id",
+        "min_value": {
+          "$PARAMETER": "urn:great_expectations:validations:network_stops_suite:expect_table_row_count_to_be_between.result.observed_value"
+        },
+        "max_value": {
+          "$PARAMETER": "urn:great_expectations:validations:network_stops_suite:expect_table_row_count_to_be_between.result.observed_value"
+        }
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Referential integrity: every `route_stops` row resolves to a known stop. `parse_network` builds the stops table *from* the ids referenced here and silently skips any node Overpass failed to return (`if node_id in nodes`), so a truncated node list shows up as route_stops referencing more distinct stops than the stops table holds. Because the stops table can never hold a stop that is not referenced, `count(distinct stop_id) == count(stops)` is exactly that check.",
+            "The bound is read from the stops validation in the same checkpoint run (`$PARAMETER` URN), which is why `network_stops_suite` runs first and the checkpoint carries `StoreEvaluationParametersAction`. Validating this suite on its own raises `EvaluationParameterError` rather than passing vacuously."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "stop_sequence"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_in_type_list",
+      "kwargs": {
+        "column": "stop_sequence",
+        "type_list": [
+          "int",
+          "int32",
+          "int64",
+          "IntegerType",
+          "LongType",
+          "INTEGER",
+          "BIGINT"
+        ]
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "A position, never a float. The type list covers the pandas, Spark and SQL execution engines so the suite can move to Glue unchanged."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "stop_sequence",
+        "min_value": 0
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Zero-based position along the route, in OSM member order. Not a timetable ordering: there are no times in this data."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_compound_columns_to_be_unique",
+      "kwargs": {
+        "column_list": [
+          "route_id",
+          "stop_sequence"
+        ]
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "The grain of the table: one position per route. Deliberately *not* (`route_id`, `stop_id`) — a loop route may legitimately serve the same stop twice, and one does in the committed sample."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "member_role"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "member_role",
+        "regex": "^(stop|platform)"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Mirrors `STOP_ROLE_PREFIXES` in network_loader.py: only members whose PTv2 role starts with `stop` or `platform` (`stop`, `stop_3`, `stop_entry_only`, `platform`, ...) are boardable points. A way or an unrelated role getting through means the member filter regressed."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "fetched_at"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "fetched_at",
+        "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00:00$"
+      },
+      "meta": {}
+    }
+  ],
+  "meta": {
+    "great_expectations_version": "0.18.x",
+    "description": "Expectations for the raw OSM route-to-stop bridge (route_stops.parquet). Validates presence of the columns network_loader emits, null constraints on both keys, the (route_id, stop_sequence) grain, the PTv2 member-role filter, a minimum row count, and that every row resolves to a known stop — the check that catches an Overpass response whose node list was truncated. One of three suites covering the network snapshot.",
+    "notes": {
+      "format": "markdown",
+      "content": [
+        "Validated by `raw_samples_checkpoint` against `data/samples/network/route_stops.parquet`, after `network_stops_suite`, whose observed row count this suite consumes."
+      ]
+    }
+  }
+}

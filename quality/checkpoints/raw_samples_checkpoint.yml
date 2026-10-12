@@ -1,0 +1,65 @@
+# The raw-data quality gate, run against the committed samples under
+# data/samples/. Needs no credentials and no network.
+#
+#     great_expectations checkpoint run raw_samples_checkpoint
+#
+# .github/workflows/ci.yml runs exactly this. Rename the checkpoint here and in
+# ci.yml together.
+#
+# Each validation binds one sample file (an asset of the datasources declared in
+# gx/great_expectations.yml) to one expectation suite from
+# quality/expectations/. The checkpoint fails if any expectation in any suite
+# fails.
+#
+# Order matters for one pair: network_stops must precede network_route_stops,
+# because the latter reads the stops row count from this run's evaluation
+# parameter store (see the $PARAMETER URN in network_route_stops_suite.json).
+# That is also why StoreEvaluationParametersAction is in the action list.
+
+name: raw_samples_checkpoint
+config_version: 1.0
+module_name: great_expectations.checkpoint
+class_name: Checkpoint
+run_name_template: "%Y%m%d-%H%M%S-raw-samples"
+
+action_list:
+  - name: store_validation_result
+    action:
+      class_name: StoreValidationResultAction
+  - name: store_evaluation_params
+    action:
+      class_name: StoreEvaluationParametersAction
+  - name: update_data_docs
+    action:
+      class_name: UpdateDataDocsAction
+
+validations:
+  - name: network_routes
+    batch_request:
+      datasource_name: network_samples
+      data_asset_name: routes
+    expectation_suite_name: network_routes_suite
+
+  - name: network_stops
+    batch_request:
+      datasource_name: network_samples
+      data_asset_name: stops
+    expectation_suite_name: network_stops_suite
+
+  - name: network_route_stops
+    batch_request:
+      datasource_name: network_samples
+      data_asset_name: route_stops
+    expectation_suite_name: network_route_stops_suite
+
+  - name: weather
+    batch_request:
+      datasource_name: weather_samples
+      data_asset_name: weather
+    expectation_suite_name: weather_suite
+
+  - name: traffic
+    batch_request:
+      datasource_name: traffic_samples
+      data_asset_name: corridor_travel_time_series
+    expectation_suite_name: traffic_suite

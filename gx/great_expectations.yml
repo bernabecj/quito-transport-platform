@@ -1,0 +1,107 @@
+# Great Expectations Data Context (GX 0.18, file-backed).
+#
+# Lives in gx/ because that is the only directory name the `great_expectations`
+# CLI discovers on its own (it walks up from the working directory looking for
+# gx/great_expectations.yml). Everything worth versioning — expectation suites
+# and checkpoints — is kept under quality/, where the project plan puts it; the
+# stores below simply point there. Validation results and Data Docs land in
+# gx/uncommitted/, which is git-ignored.
+#
+# Run the full raw-data gate from the repository root:
+#     great_expectations checkpoint run raw_samples_checkpoint
+#
+# The datasources read the committed Parquet samples under data/samples/, so the
+# gate needs no credentials and no network. Their base_directory is resolved
+# against the working directory (a fluent-datasource rule, unlike the store
+# paths, which resolve against this file's directory) — run from the repo root.
+
+config_version: 3.0
+
+# One datasource per external source, mirroring the raw-zone prefixes
+# (raw/network, raw/weather, raw/traffic). Keeping each rooted in its own
+# sample directory keeps the batching_regex a bare file name, which matches on
+# every OS; a regex spanning a sub-directory would have to cope with the path
+# separator.
+fluent_datasources:
+  network_samples:
+    type: pandas_filesystem
+    assets:
+      routes:
+        type: parquet
+        batching_regex: ^routes\.parquet$
+      stops:
+        type: parquet
+        batching_regex: ^stops\.parquet$
+      route_stops:
+        type: parquet
+        batching_regex: ^route_stops\.parquet$
+    base_directory: data/samples/network
+  weather_samples:
+    type: pandas_filesystem
+    assets:
+      weather:
+        type: parquet
+        batching_regex: ^weather\.parquet$
+    base_directory: data/samples/weather
+  traffic_samples:
+    type: pandas_filesystem
+    assets:
+      corridor_travel_time_series:
+        type: parquet
+        batching_regex: ^corridor_travel_time_series\.parquet$
+    base_directory: data/samples/traffic
+datasources: {}
+
+config_variables_file_path: uncommitted/config_variables.yml
+plugins_directory: plugins/
+
+stores:
+  expectations_store:
+    class_name: ExpectationsStore
+    store_backend:
+      class_name: TupleFilesystemStoreBackend
+      # Holds the .ge_store_backend_id marker GX uses as the project id.
+      base_directory: ../quality/expectations/
+
+  checkpoint_store:
+    class_name: CheckpointStore
+    store_backend:
+      class_name: TupleFilesystemStoreBackend
+      suppress_store_backend_id: true
+      base_directory: ../quality/checkpoints/
+
+  validations_store:
+    class_name: ValidationsStore
+    store_backend:
+      class_name: TupleFilesystemStoreBackend
+      suppress_store_backend_id: true
+      base_directory: uncommitted/validations/
+
+  # In-memory. Lets a later validation in the same checkpoint run reference the
+  # observed result of an earlier one (the route_stops -> stops integrity check).
+  evaluation_parameter_store:
+    class_name: EvaluationParameterStore
+expectations_store_name: expectations_store
+checkpoint_store_name: checkpoint_store
+validations_store_name: validations_store
+evaluation_parameter_store_name: evaluation_parameter_store
+
+data_docs_sites:
+  local_site:
+    class_name: SiteBuilder
+    show_how_to_buttons: false
+    store_backend:
+      class_name: TupleFilesystemStoreBackend
+      base_directory: uncommitted/data_docs/local_site/
+    site_index_builder:
+      class_name: DefaultSiteIndexBuilder
+
+# CI must not phone home.
+anonymous_usage_statistics:
+  data_context_id: 0b90779b-5cfa-4ef1-8e81-df904554963f
+  enabled: false
+include_rendered_content:
+  globally: false
+  expectation_suite: false
+  expectation_validation_result: false
+notebooks:

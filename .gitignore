@@ -2,6 +2,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
+.coverage
 .venv/
 venv/
 dist/
@@ -23,6 +24,8 @@ dbt/logs/
 # Great Expectations
 gx/uncommitted/
 great_expectations/uncommitted/
+# Pristine copies made by scripts/break_samples.py; scripts/restore_samples.py removes it
+data/samples/.backup/
 
 # AWS credentials (never commit these)
 .aws/
@@ -31,6 +34,7 @@ great_expectations/uncommitted/
 .vscode/
 .idea/
 *.iml
+.claude/
 
 # OS
 .DS_Store

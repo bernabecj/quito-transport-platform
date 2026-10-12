@@ -182,6 +182,8 @@ df.expect_table_row_count_to_be_between("routes", min_value=400)
 
 That last one matters: OSM is community-edited, so a sudden collapse in route count means a bad extract, not a city that lost its buses.
 
+As built: one suite per raw table under `quality/expectations/`, run together by the `raw_samples_checkpoint` checkpoint against the committed samples (`great_expectations checkpoint run raw_samples_checkpoint`, no credentials needed). See [`quality/README.md`](../quality/README.md).
+
 ### 3. dbt Tests — Data integrity in the warehouse
 
 ```yaml

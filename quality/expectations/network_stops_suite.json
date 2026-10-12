@@ -1,0 +1,195 @@
+{
+  "expectation_suite_name": "network_stops_suite",
+  "data_asset_type": null,
+  "ge_cloud_id": null,
+  "expectations": [
+    {
+      "expectation_type": "expect_table_columns_to_match_set",
+      "kwargs": {
+        "column_set": [
+          "stop_id",
+          "stop_name",
+          "latitude",
+          "longitude",
+          "stop_type",
+          "shelter",
+          "fetched_at"
+        ],
+        "exact_match": false
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Every column `network_loader._stop_record` emits must be present. Extra columns are allowed: exports from the raw zone carry the `year`/`month`/`day` partition keys."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_table_row_count_to_be_between",
+      "kwargs": {
+        "min_value": 300
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "The Overpass query emits route relations first and their member nodes second, so a response cut off mid-stream loses stops before it loses routes: the routes table can look intact while this one collapses. 485 stops were served by a route on 2026-08-19."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "stop_id"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_unique",
+      "kwargs": {
+        "column": "stop_id"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "One row per physical stop. `parse_network` deduplicates stops shared across routes; a duplicate means that collapsed, or that two snapshots were mixed into one batch."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "stop_id",
+        "regex": "^\\d+$"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "OSM node ids, stored as strings. Catches a numeric round-trip that turns `262203745` into `262203745.0`, which would break the join from route_stops."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "latitude"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "longitude"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "latitude",
+        "min_value": -0.45,
+        "max_value": 0.05
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "South and north edges of `QUITO_BBOX` in ingestion/constants.py, `(south, west, north, east) = (-0.45, -78.65, 0.05, -78.30)`. The Overpass query filters *relations* by this box, but then fetches *all* their member nodes, so a stop outside it is possible in principle and means a route that leaves the city. `tests/test_quality_suites.py` fails if these numbers drift from the constant; dbt/tests/assert_stops_within_quito_bbox.sql re-checks the same box in the warehouse."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "longitude",
+        "min_value": -78.65,
+        "max_value": -78.3
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "West and east edges of `QUITO_BBOX`. Also the cheapest possible lat/lon swap detector: a swapped pair lands near (-78, -0.2), far outside both ranges."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "stop_type",
+        "value_set": [
+          "stop_position",
+          "platform",
+          "station"
+        ]
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "The OSM `public_transport` tag on a node. Null is acceptable (70 of 485 stops carried no tag on 2026-08-19) and is ignored by this check; a value outside the PTv2 vocabulary is not."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "shelter",
+        "value_set": [
+          "yes",
+          "no"
+        ]
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Too sparse to analyse (7 of 485 stops tagged), which is why no mart depends on it, but when present it must be a boolean tag."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "fetched_at"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "fetched_at",
+        "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00:00$"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "ISO-8601 in UTC, as written by `datetime.now(timezone.utc).isoformat()`."
+          ]
+        }
+      }
+    }
+  ],
+  "meta": {
+    "great_expectations_version": "0.18.x",
+    "description": "Expectations for the raw OSM stop nodes (stops.parquet). Validates presence of the columns network_loader emits, null constraints on the identifier and coordinates, coordinates inside the Quito bounding box (QUITO_BBOX), the PTv2 tag vocabulary, and a minimum stop count that guards against a truncated Overpass response. One of three suites covering the network snapshot.",
+    "notes": {
+      "format": "markdown",
+      "content": [
+        "Validated by `raw_samples_checkpoint` against `data/samples/network/stops.parquet`. Its row count is also consumed by `network_route_stops_suite` for the referential-integrity check, so it must run first in the checkpoint."
+      ]
+    }
+  }
+}

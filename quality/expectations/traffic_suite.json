@@ -1,0 +1,343 @@
+{
+  "expectation_suite_name": "traffic_suite",
+  "data_asset_type": null,
+  "ge_cloud_id": null,
+  "expectations": [
+    {
+      "expectation_type": "expect_table_columns_to_match_set",
+      "kwargs": {
+        "column_set": [
+          "route_id",
+          "route_ref",
+          "route_name",
+          "sampled_at",
+          "local_hour",
+          "waypoint_count",
+          "mean_hop_km",
+          "distance_meters",
+          "duration_seconds",
+          "mean_speed_kmh",
+          "segments_total",
+          "segments_known",
+          "congestion_known_pct",
+          "congestion_low",
+          "congestion_moderate",
+          "congestion_heavy",
+          "congestion_severe",
+          "congestion_unknown"
+        ],
+        "exact_match": false
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "The columns `traffic_loader.sample_corridor` emits, minus `local_weekday`, which the loader gained after the committed series was collected and which is derivable from `sampled_at`. Extra columns are allowed: the series carries the `year`/`month`/`day`/`hour` partition keys from the raw zone."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_table_row_count_to_be_between",
+      "kwargs": {
+        "min_value": 14
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "One sample is one row per trunk corridor, and 14 corridors pass the `CORRIDOR_MAX_MEAN_HOP_KM` gate (18 match `TRUNK_ROUTE_PATTERN`). `sample_corridors` logs and skips a corridor whose Mapbox call fails, so a short sample is written without any error upstream; this is where it gets noticed."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_unique_value_count_to_be_between",
+      "kwargs": {
+        "column": "route_id",
+        "min_value": 14
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Same guard for a multi-sample batch, where the row count alone cannot tell a missing corridor from a missing hour. If OSM edits change which corridors survive the hop filter, change this number deliberately."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "route_id"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "route_id",
+        "regex": "^\\d+$"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "OSM relation id of the corridor, stored as a string; `fct_corridor_travel_time` joins it to `dim_routes`."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "route_ref"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "route_name"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "route_name",
+        "regex": "Trole|Ecov|MetroBus|Metrobus"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Mirrors `TRUNK_ROUTE_PATTERN` in ingestion/constants.py. Only the trunk BRT systems are sampled; a feeder route here means the corridor selection regressed and is spending Mapbox quota on the wrong thing."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "sampled_at"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "sampled_at",
+        "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00:00$"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "ISO-8601 in UTC, still a string in the raw zone. The staging model derives Quito time (UTC-5, no DST) from it."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_compound_columns_to_be_unique",
+      "kwargs": {
+        "column_list": [
+          "route_id",
+          "sampled_at"
+        ]
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "The grain: one row per corridor per sample. A duplicate would double-count a corridor in every peak-hour aggregate."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "local_hour"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "local_hour",
+        "min_value": 0,
+        "max_value": 23
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "waypoint_count",
+        "min_value": 2,
+        "max_value": 25
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "At least two points to route between; at most `MAPBOX_MAX_WAYPOINTS` (25), the hard API limit the loader downsamples to."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "mean_hop_km",
+        "min_value": 0,
+        "strict_min": true,
+        "max_value": 1.0
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Re-asserts the loader's own scrambling gate, `CORRIDOR_MAX_MEAN_HOP_KM = 1.0`: a corridor whose OSM stop order is not geographic would be routed as a zigzag and must never reach this table. Healthy corridors sit at 0.53-0.81 km."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "duration_seconds"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "duration_seconds",
+        "min_value": 0,
+        "strict_min": true,
+        "max_value": 14400
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "The payload of the whole dataset. Strictly positive: zero or negative is not a slow corridor, it is a broken response, and a zero would also have produced a null `mean_speed_kmh`. The ceiling of four hours is far above the observed 855-5,341 s, on corridors of 8-31 km; anything longer is not a traversal."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "distance_meters"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "distance_meters",
+        "min_value": 5000,
+        "max_value": 60000
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Plausibility bounds for a BRT corridor, not a reroute detector. Mapbox reroutes between calls even with fixed waypoints (up to ~20% spread per corridor in the committed series, data/samples/README.md), and that is a documented property of the source that the analysis accounts for, not a row that fails validation. Telling a 5% reroute from a 50% one needs the corridor's own history, which belongs in the warehouse, not in a single-batch gate. These bounds catch the gross case: a response that routed somewhere else entirely."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "mean_speed_kmh"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "The loader writes null here only when `duration_seconds` is zero, so this is a second witness to the same failure."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "mean_speed_kmh",
+        "min_value": 5,
+        "max_value": 80
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "An urban bus corridor does not average above 80 km/h, and below 5 km/h the duration or distance unit is wrong. Observed 18-40 km/h."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "segments_total",
+        "min_value": 1
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Zero segments means the `congestion` annotation was missing from the response, in which case the loader writes `congestion_known_pct = 0.0` and every coverage column is meaningless rather than merely low."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_pair_values_a_to_be_greater_than_b",
+      "kwargs": {
+        "column_A": "segments_total",
+        "column_B": "segments_known",
+        "or_equal": true
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "`segments_known` is `segments_total` minus the `unknown` count, so it can never exceed the total."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_between",
+      "kwargs": {
+        "column": "congestion_known_pct",
+        "min_value": 0,
+        "max_value": 100
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "No lower bound beyond zero on purpose: coverage is structured by time of day (1.8% at 04:00 local against 56.5% at 21:00), so a low value is a real observation, not a defect."
+          ]
+        }
+      }
+    }
+  ],
+  "meta": {
+    "great_expectations_version": "0.18.x",
+    "description": "Expectations for the raw Mapbox corridor travel-time series (corridor_travel_time_series.parquet). Validates presence of the columns traffic_loader emits, the (route_id, sampled_at) grain, ISO-8601 UTC timestamps, a full set of trunk corridors per batch (guards against corridors the loader skipped after a failed Mapbox call), the loader's own waypoint and stop-spacing limits, strictly positive durations, and plausibility ranges on distance, speed and congestion coverage.",
+    "notes": {
+      "format": "markdown",
+      "content": [
+        "Validated by `raw_samples_checkpoint` against `data/samples/traffic/corridor_travel_time_series.parquet`. The single-snapshot `corridor_travel_time.parquet` is not validated: with one `sampled_at` it cannot exercise the series-level checks, and the samples README marks the series as the file to build on."
+      ]
+    }
+  }
+}

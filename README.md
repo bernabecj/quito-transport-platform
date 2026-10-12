@@ -200,12 +200,15 @@ Run: `pytest tests/ -v`
 
 Runs before any data enters the warehouse. The Airflow DAG halts and alerts if any expectation fails.
 
-```python
-df.expect_column_to_exist("route_id")
-df.expect_column_values_to_not_be_null("stop_id")
-df.expect_column_values_to_be_between("latitude", min_value=-0.45, max_value=0.05)
-df.expect_column_values_to_be_between("longitude", min_value=-78.65, max_value=-78.30)
+One suite per raw table under [`quality/expectations/`](quality/expectations/) — three for the network snapshot (`routes`, `stops`, `route_stops`), one for weather, one for the corridor travel-time series. They check the columns each loader emits, null constraints, coordinates inside `QUITO_BBOX`, minimum row counts (a truncated Overpass response returns fewer routes, not an error), that every `route_stops` row resolves to a known stop, strictly positive travel times, and physical ranges on the weather measurements.
+
+The checkpoint `raw_samples_checkpoint` runs all of them against the committed samples, with no credentials and no network:
+
+```bash
+great_expectations checkpoint run raw_samples_checkpoint
 ```
+
+[`tests/test_quality_suites.py`](tests/test_quality_suites.py) pins every threshold that mirrors `ingestion/constants.py` and proves each suite fails on the corruption it exists to catch. Details, including how the Data Context is wired, in [`quality/README.md`](quality/README.md).
 
 ### 3. dbt Tests — data integrity in the warehouse
 
@@ -242,15 +245,22 @@ quito-transport-platform/
 ├── data/
 │   └── samples/                    # Real captured data for offline development
 ├── scripts/
-│   └── verify_mapbox_traffic.py    # Go/no-go check on Quito traffic coverage
+│   ├── verify_mapbox_traffic.py    # Go/no-go check on Quito traffic coverage
+│   ├── break_samples.py            # Corrupt the samples so the quality gate fails (drills)
+│   └── restore_samples.py          # Put the pristine samples back
 ├── processing/
 │   └── glue_jobs/
 │       ├── clean_network.py        # PySpark: clean raw network snapshots
 │       └── enrich_weather.py       # PySpark: join network + weather
+├── gx/
+│   └── great_expectations.yml      # GE Data Context: datasources over data/samples, stores in quality/
 ├── quality/
-│   └── expectations/
-│       ├── network_suite.json      # GE expectations for network data
-│       └── weather_suite.json      # GE expectations for weather data
+│   ├── expectations/               # One GE suite per raw table (network x3, weather, traffic)
+│   ├── checkpoints/
+│   │   └── raw_samples_checkpoint.yml  # Runs every suite; what CI runs
+│   └── README.md
+├── tests/
+│   └── test_quality_suites.py      # Suites track constants.py and fail on bad data
 ├── dbt/
 │   ├── models/
 │   │   ├── staging/                # stg_routes, stg_stops, stg_weather
@@ -322,6 +332,14 @@ cd airflow && astro dev start        # UI at http://localhost:8080
 pytest tests/ -v --cov=ingestion --cov=processing
 ```
 
+### Run the data quality gate
+
+```bash
+great_expectations checkpoint run raw_samples_checkpoint
+```
+
+Validates every committed sample against its suite. Needs no credentials; see [`quality/README.md`](quality/README.md).
+
 ### Run dbt models
 
 ```bash
@@ -354,7 +372,7 @@ Every push runs the full CI pipeline via GitHub Actions (`.github/workflows/ci.y
 
 1. `pytest` — unit tests
 2. `dbt test` — warehouse integrity checks
-3. Great Expectations checkpoint — raw data quality suite
+3. Great Expectations checkpoint `raw_samples_checkpoint` — raw data quality suites against the committed samples
 
 Merging to `main` also triggers a deploy of updated dbt models to Redshift.
 

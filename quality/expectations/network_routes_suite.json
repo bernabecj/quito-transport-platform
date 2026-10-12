@@ -1,0 +1,198 @@
+{
+  "expectation_suite_name": "network_routes_suite",
+  "data_asset_type": null,
+  "ge_cloud_id": null,
+  "expectations": [
+    {
+      "expectation_type": "expect_table_columns_to_match_set",
+      "kwargs": {
+        "column_set": [
+          "route_id",
+          "route_ref",
+          "route_name",
+          "route_type",
+          "operator",
+          "network",
+          "origin",
+          "destination",
+          "colour",
+          "fetched_at"
+        ],
+        "exact_match": false
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Every column `network_loader._route_record` emits must be present. Extra columns are allowed: exports from the raw zone carry the `year`/`month`/`day` partition keys."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_table_row_count_to_be_between",
+      "kwargs": {
+        "min_value": 400
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Guards against a truncated Overpass response. Overpass sheds load by returning a partial body under HTTP 200, and `fetch_network` only rejects an *empty* one, so a short extract would otherwise flow through unnoticed. OSM had 515 route relations in the Quito bbox on 2026-08-19; a sudden collapse means a bad extract, not a city that lost its buses (docs/PROJECT_PLAN.md)."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "route_id"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_unique",
+      "kwargs": {
+        "column": "route_id"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "One row per OSM relation. Duplicates would also mean a batch has mixed two snapshots together, which defeats the row-count guard."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "route_id",
+        "regex": "^\\d+$"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "OSM relation ids, stored as strings. Catches a numeric round-trip that turns `85965` into `85965.0`, which would break every join in the warehouse."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "route_type"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_be_in_set",
+      "kwargs": {
+        "column": "route_type",
+        "value_set": [
+          "bus",
+          "trolleybus",
+          "subway",
+          "light_rail",
+          "share_taxi",
+          "tram"
+        ]
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Mirrors `OSM_ROUTE_TYPES` in ingestion/constants.py, which is also the filter in the Overpass query. Anything else means the query or the parser changed."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "route_name",
+        "mostly": 0.95
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "Community-mapped, so not strictly complete: 514 of 515 routes were named on 2026-08-19."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "route_ref",
+        "mostly": 0.9
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "The README's claim of 93-99% completeness on `operator`, `ref`, `from` and `to` is what makes operator-coverage analysis sound. Below 90% that claim no longer holds and the analysis needs re-evaluating. Observed 2026-08-19: `route_ref` 94.2%, `operator` 93.6%, `origin` 93.6%, `destination` 93.6%."
+          ]
+        }
+      }
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "operator",
+        "mostly": 0.9
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "origin",
+        "mostly": 0.9
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "destination",
+        "mostly": 0.9
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_not_be_null",
+      "kwargs": {
+        "column": "fetched_at"
+      },
+      "meta": {}
+    },
+    {
+      "expectation_type": "expect_column_values_to_match_regex",
+      "kwargs": {
+        "column": "fetched_at",
+        "regex": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?\\+00:00$"
+      },
+      "meta": {
+        "notes": {
+          "format": "markdown",
+          "content": [
+            "ISO-8601 in UTC, as written by `datetime.now(timezone.utc).isoformat()`. The staging models parse this string; a format change breaks them silently."
+          ]
+        }
+      }
+    }
+  ],
+  "meta": {
+    "great_expectations_version": "0.18.x",
+    "description": "Expectations for the raw OSM transit route relations (routes.parquet). Validates presence of the columns network_loader emits, null constraints on the identifier and on the tags the analysis depends on, the route-type vocabulary, and a minimum route count that guards against a truncated Overpass response. One of three suites covering the network snapshot: routes, stops and route_stops are separate tables with different columns, and a suite binds to one batch.",
+    "notes": {
+      "format": "markdown",
+      "content": [
+        "Validated by `raw_samples_checkpoint` against `data/samples/network/routes.parquet`."
+      ]
+    }
+  }
+}

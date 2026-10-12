@@ -45,6 +45,8 @@ line_length = 100
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Lets the tests import ingestion/ without the project being pip-installed.
+pythonpath = ["."]
 addopts = "-v --cov=ingestion --cov=processing --cov-report=term-missing"
 
 [build-system]
