@@ -23,10 +23,11 @@ Why there is no free-flow baseline column
   requests: one per corridor per sample instead of two.
 
 Cost
-  14 corridors x 1 request per sample — 18 trunk relations match the pattern,
-  four are dropped by the CORRIDOR_MAX_MEAN_HOP_KM scrambling filter in
-  build_corridors. Sampling hourly for a month is roughly 10,100 requests
-  against Mapbox's 100,000/month free tier.
+  18 corridors x 1 request per sample — one per trunk relation. Sampling
+  hourly for a month is roughly 13,000 requests against Mapbox's 100,000/month
+  free tier. (Until 2026-10 four Ecovía relations were dropped by the
+  CORRIDOR_MAX_MEAN_HOP_KM gate in build_corridors because OSM lists their
+  stops out of order; network_loader now orders those from the road geometry.)
 
 Partitioning caveat
   The S3 key below is partitioned to the hour with no minute component, so two
@@ -37,7 +38,6 @@ Partitioning caveat
 import io
 import json
 import logging
-import math
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -50,6 +50,7 @@ from dotenv import load_dotenv
 
 from ingestion.constants import (
     CORRIDOR_MAX_MEAN_HOP_KM,
+    CORRIDOR_MAX_SNAP_M,
     MAPBOX_DIRECTIONS_URL,
     MAPBOX_HTTP_TIMEOUT,
     MAPBOX_MAX_WAYPOINTS,
@@ -61,6 +62,8 @@ from ingestion.constants import (
     TRAFFIC_SAMPLING_ENABLED_VAR,
     TRUNK_ROUTE_PATTERN,
 )
+from ingestion.geometry import mean_hop_km
+from ingestion.network_loader import SEQUENCE_FROM_GEOMETRY, SEQUENCE_FROM_MEMBERS
 
 load_dotenv()
 
@@ -141,6 +144,7 @@ def build_corridors(
     for route in trunk.itertuples():
         members = route_stops[route_stops["route_id"] == route.route_id]
         members = members.sort_values("stop_sequence")
+        members, excluded = _exclude_off_road_stops(members, route.route_name)
         points = [
             (coords.loc[s, "longitude"], coords.loc[s, "latitude"])
             for s in members["stop_id"]
@@ -149,7 +153,7 @@ def build_corridors(
         if len(points) < 2:
             continue
 
-        mean_hop = _mean_hop_km(points)
+        mean_hop = mean_hop_km(points)
         if mean_hop > CORRIDOR_MAX_MEAN_HOP_KM:
             logger.warning(
                 "skipping %s: stops are %.2f km apart on average, so the relation's "
@@ -165,31 +169,42 @@ def build_corridors(
                 "route_ref": route.route_ref,
                 "route_name": route.route_name,
                 "mean_hop_km": round(mean_hop, 2),
+                "sequence_source": _sequence_source(members),
+                "stops_excluded": excluded,
                 "waypoints": _downsample(points, MAPBOX_MAX_WAYPOINTS),
             }
         )
     return corridors
 
 
-def _haversine_km(a: tuple, b: tuple) -> float:
-    (lon1, lat1), (lon2, lat2) = a, b
-    rad = math.pi / 180
-    inner = (
-        math.sin((lat2 - lat1) * rad / 2) ** 2
-        + math.cos(lat1 * rad) * math.cos(lat2 * rad) * math.sin((lon2 - lon1) * rad / 2) ** 2
-    )
-    return 2 * 6371 * math.asin(math.sqrt(inner))
+def _sequence_source(members: pd.DataFrame) -> str:
+    """Where this route's stop order came from; snapshots written before the
+    column existed are all member order."""
+    if "sequence_source" not in members.columns or members.empty:
+        return SEQUENCE_FROM_MEMBERS
+    return members["sequence_source"].iloc[0]
 
 
-def _mean_hop_km(points: list[tuple]) -> float:
-    """Average distance between consecutive stops — the scrambling detector.
+def _exclude_off_road_stops(members: pd.DataFrame, route_name: str) -> tuple[pd.DataFrame, int]:
+    """Drop stops that are not on the corridor's road from the waypoint list.
 
-    Mean hop separates a genuine loop route (smooth ~0.6 km spacing, endpoints
-    close together) from a relation whose members are out of order (erratic
-    multi-kilometre jumps). End-to-end distance alone would flag both.
+    Only for routes whose order came from the geometry: there, a stop far from
+    the road is a misplaced member (see CORRIDOR_MAX_SNAP_M). Routes that kept
+    the OSM member order are left whole — for them a large snap distance means
+    the mapped road has a hole where the stop is, and the stop is still right.
+    Nothing is removed from route_stops itself; this only shapes the request.
     """
-    hops = [_haversine_km(points[i], points[i + 1]) for i in range(len(points) - 1)]
-    return sum(hops) / len(hops)
+    if _sequence_source(members) != SEQUENCE_FROM_GEOMETRY:
+        return members, 0
+    off_road = members["snap_distance_m"] > CORRIDOR_MAX_SNAP_M
+    for stop in members[off_road].itertuples():
+        logger.warning(
+            "%s: stop %s is %.0f m from the road, not used as a waypoint",
+            route_name,
+            stop.stop_id,
+            stop.snap_distance_m,
+        )
+    return members[~off_road], int(off_road.sum())
 
 
 def _downsample(points: list[tuple], limit: int) -> list[tuple]:
@@ -256,6 +271,10 @@ def sample_corridor(corridor: dict, token: str, sampled_at: datetime) -> dict:
         "local_weekday": local.weekday(),
         "waypoint_count": len(corridor["waypoints"]),
         "mean_hop_km": corridor["mean_hop_km"],
+        # Provenance of the waypoint order, so the four corridors recovered
+        # from road geometry can be told apart from the rest in the series.
+        "sequence_source": corridor["sequence_source"],
+        "stops_excluded": corridor["stops_excluded"],
         "distance_meters": round(distance_m, 1),
         "duration_seconds": round(duration_s, 1),
         "mean_speed_kmh": round(distance_m / duration_s * 3.6, 2) if duration_s else None,

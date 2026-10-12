@@ -35,7 +35,7 @@ def digest(path: Path) -> str:
 def backed_up_files() -> list[Path]:
     if not BACKUP.is_dir():
         return []
-    return sorted(p for p in BACKUP.rglob("*.parquet") if p.is_file())
+    return sorted(p for p in BACKUP.rglob("*") if p.is_file())
 
 
 def restore_from_backup(check_only: bool) -> int:

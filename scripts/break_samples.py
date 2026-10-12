@@ -23,9 +23,17 @@ Usage:
     python scripts/break_samples.py --all        # every drill below
     python scripts/break_samples.py --list
     python scripts/restore_samples.py            # put everything back
+
+The three `corridor-*` drills edit the trunk geometry fixture instead of a
+parquet sample. They are caught by pytest, not Great Expectations:
+
+    python scripts/break_samples.py corridor-geometry-missing
+    pytest tests/test_trunk_fixture.py           # fails on the named test
+    python scripts/check_corridors.py --overpass data/samples/network/overpass_trunk_geom.json
 """
 
 import argparse
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -40,6 +48,7 @@ STOPS = SAMPLES / "network" / "stops.parquet"
 ROUTES = SAMPLES / "network" / "routes.parquet"
 WEATHER = SAMPLES / "weather" / "weather.parquet"
 TRAFFIC = SAMPLES / "traffic" / "corridor_travel_time_series.parquet"
+FIXTURE = SAMPLES / "network" / "overpass_trunk_geom.json"
 
 
 # ── the drills ───────────────────────────────────────────────────────────────
@@ -71,6 +80,64 @@ def truncated_stop_nodes(df: pd.DataFrame) -> pd.DataFrame:
 
 def missing_corridor(df: pd.DataFrame) -> pd.DataFrame:
     return df[df["route_id"] != df["route_id"].iloc[0]]
+
+
+# The fixture drills work on either shape the fixture can have — a raw
+# Overpass response ({"elements": [...]}) or the overpass-turbo GeoJSON export
+# ({"features": [...]}); see data/samples/README.md.
+
+E1_SCRAMBLED = 12110323  # Ecovía E1 Las Universidades - T. Sur: order must come from geometry
+E1_STOP_ON_ROAD = 1630983244  # "Casa de la Cultura", served by this E1 relation only
+
+
+def _is_raw(payload: dict) -> bool:
+    return "elements" in payload
+
+
+def e1_without_road_geometry(payload: dict) -> dict:
+    """Take the road away from the scrambled E1 relation.
+
+    With no geometry to project onto, the loader falls back to OSM's member
+    order — 2.49 km mean hop — and the corridor is dropped again: 17 of 18.
+    """
+    if _is_raw(payload):
+        relation = next(e for e in payload["elements"] if e["type"] == "relation" and e["id"] == E1_SCRAMBLED)
+        way_ids = {m["ref"] for m in relation["members"] if m["type"] == "way"}
+        payload["elements"] = [
+            e for e in payload["elements"] if not (e["type"] == "way" and e["id"] in way_ids)
+        ]
+    else:
+        feature = next(f for f in payload["features"] if f["id"] == f"relation/{E1_SCRAMBLED}")
+        feature["geometry"] = {"type": "MultiLineString", "coordinates": []}
+    return payload
+
+
+def e1_stop_pushed_off_the_road(payload: dict) -> dict:
+    """Move one on-road E1 stop 1 km east of the corridor.
+
+    The stop still orders correctly, but it now snaps > CORRIDOR_MAX_SNAP_M,
+    so traffic_loader leaves it out of the waypoints and the fixture tests
+    see a misplaced stop that is not one of the three known ones.
+    """
+    shift = 0.009  # degrees of longitude, ~1 km on the equator
+    if _is_raw(payload):
+        node = next(e for e in payload["elements"] if e["type"] == "node" and e["id"] == E1_STOP_ON_ROAD)
+        node["lon"] += shift
+    else:
+        feature = next(f for f in payload["features"] if f["id"] == f"node/{E1_STOP_ON_ROAD}")
+        feature["geometry"]["coordinates"][0] += shift
+    return payload
+
+
+def e1_relation_removed(payload: dict) -> dict:
+    """Drop the scrambled E1 relation altogether: 17 trunk relations."""
+    if _is_raw(payload):
+        payload["elements"] = [
+            e for e in payload["elements"] if not (e["type"] == "relation" and e["id"] == E1_SCRAMBLED)
+        ]
+    else:
+        payload["features"] = [f for f in payload["features"] if f["id"] != f"relation/{E1_SCRAMBLED}"]
+    return payload
 
 
 DRILLS = {
@@ -110,6 +177,24 @@ DRILLS = {
         missing_corridor,
         "traffic_suite",
         "expect_column_unique_value_count_to_be_between(route_id)",
+    ),
+    "corridor-geometry-missing": (
+        FIXTURE,
+        e1_without_road_geometry,
+        "tests/test_trunk_fixture.py",
+        "test_every_trunk_corridor_is_sampled (E1 back to 2.49 km, 17 of 18)",
+    ),
+    "corridor-stop-off-road": (
+        FIXTURE,
+        e1_stop_pushed_off_the_road,
+        "tests/test_trunk_fixture.py",
+        "test_misplaced_e3_stops_are_identified_by_id (a fourth off-road stop, excluded from E1's waypoints)",
+    ),
+    "corridor-relation-missing": (
+        FIXTURE,
+        e1_relation_removed,
+        "tests/test_trunk_fixture.py",
+        "test_fixture_holds_the_eighteen_trunk_corridors",
     ),
 }
 DEFAULT_DRILLS = ["network", "weather", "traffic"]
@@ -158,8 +243,11 @@ def main() -> int:
             print(f"{name}: {path.relative_to(ROOT)} is missing — restore it first", file=sys.stderr)
             return 1
         fresh = ensure_backup(path)
-        df = corrupt(pd.read_parquet(path))
-        df.to_parquet(path, index=False)
+        if path.suffix == ".json":
+            payload = corrupt(json.loads(path.read_text(encoding="utf-8")))
+            path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        else:
+            corrupt(pd.read_parquet(path)).to_parquet(path, index=False)
         print(
             f"{name}: edited {path.relative_to(ROOT)}"
             f"{' (backed up)' if fresh else ' (backup already present, kept)'}"
@@ -167,7 +255,8 @@ def main() -> int:
         )
 
     print(
-        "\nRun:      great_expectations checkpoint run raw_samples_checkpoint"
+        "\nRun:      great_expectations checkpoint run raw_samples_checkpoint   (parquet drills)"
+        "\n          pytest tests/test_trunk_fixture.py                          (corridor-* drills)"
         "\nRestore:  python scripts/restore_samples.py"
     )
     return 0

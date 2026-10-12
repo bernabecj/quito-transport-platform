@@ -64,13 +64,26 @@ MAPBOX_SECRET_KEY = "MAPBOX_TOKEN"
 # requests for corridors that are mostly low-frequency feeder services.
 TRUNK_ROUTE_PATTERN = r"Trole|Ecov|MetroBus|Metrobus"
 
-# Quality gate on corridor geometry. `stop_sequence` follows the order members
-# appear in the OSM relation, which for some Quito routes is not geographic
-# order — measured 2026-08-19, four trunk corridors had consecutive "stops" up
-# to 15.9 km apart, which no BRT has. Routing through scrambled waypoints
-# measures a zigzag, not the corridor, so those are excluded from sampling.
-# Healthy corridors sit at 0.53-0.81 km mean hop; the broken ones at 1.18-2.49.
+# Quality gate on corridor geometry. Measured 2026-08-19, four trunk relations
+# listed their stops out of order in OSM, with consecutive "stops" up to
+# 15.9 km apart, which no BRT has. Routing through scrambled waypoints measures
+# a zigzag, not the corridor, so anything over this mean hop is not sampled.
+# Healthy corridors sit at 0.53-0.81 km; those four sat at 1.18-2.49 km until
+# network_loader started ordering them from the road geometry (2026-10), after
+# which they measure 0.51-0.68 km. The gate stays as the safety net.
 CORRIDOR_MAX_MEAN_HOP_KM = 1.0
+
+# When network_loader took a corridor's stop order from the road geometry
+# (route_stops.sequence_source == "geometry"), a stop this far from that road
+# is not on the corridor: it is a member the relation should not have, or a
+# stop beyond the end of the mapped road. Such stops stay in route_stops but
+# are not sent to Mapbox as waypoints — routed through, they add a detour the
+# corridor does not have (6.8 km on one E3 relation). Measured 2026-10-12:
+# every on-road trunk stop snaps within 90 m; the misplaced ones sit at
+# 1.15, 1.48 and 6.83 km. Not applied to routes that kept the OSM member
+# order, where a large snap distance means a hole in the mapped road, not a
+# misplaced stop.
+CORRIDOR_MAX_SNAP_M = 200
 
 # The live Mapbox call is opt-in. Left unset, the loader refuses to spend API
 # quota; sampling only happens when this is explicitly set to "true".

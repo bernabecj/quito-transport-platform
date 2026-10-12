@@ -240,12 +240,14 @@ quito-transport-platform/
 │       └── full_pipeline.py        # DAG: end-to-end orchestration
 ├── ingestion/
 │   ├── network_loader.py           # Query Overpass, normalise to Parquet
+│   ├── geometry.py                 # Chain OSM ways, project stops onto the road
 │   ├── traffic_loader.py           # Sample corridor travel time (off by default)
 │   └── weather_loader.py           # Fetch + normalise OpenWeather
 ├── data/
 │   └── samples/                    # Real captured data for offline development
 ├── scripts/
 │   ├── verify_mapbox_traffic.py    # Go/no-go check on Quito traffic coverage
+│   ├── check_corridors.py          # Which trunk corridors get sampled, and why (offline)
 │   ├── break_samples.py            # Corrupt the samples so the quality gate fails (drills)
 │   └── restore_samples.py          # Put the pristine samples back
 ├── processing/
