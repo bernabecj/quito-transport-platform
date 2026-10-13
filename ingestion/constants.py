@@ -1,3 +1,5 @@
+from pathlib import Path
+
 QUITO_LAT = -0.1807
 QUITO_LON = -78.4678
 
@@ -45,6 +47,23 @@ S3_BUCKET_NAME = "quito-transport-platform"
 S3_WEATHER_PREFIX = "weather"
 S3_NETWORK_PREFIX = "network"
 S3_TRAFFIC_PREFIX = "traffic"
+
+# Where the local storage backend (ingestion/storage.py) puts the raw zone
+# when running without AWS. It stands in for the bucket: the same keys the
+# loaders write to S3 land under this folder, so
+# s3://<bucket>/raw/weather/year=.../weather.parquet becomes
+# data/local/raw/weather/year=.../weather.parquet. Resolved from this file,
+# not the working directory, so `python -m ingestion.weather_loader` lands in
+# the same place wherever it is launched from.
+LOCAL_STORAGE_ROOT = Path(__file__).resolve().parent.parent / "data" / "local"
+
+# The one switch between the two backends. Unset means S3: the Lambdas set no
+# such variable (see lambda.tf) and must keep writing to the bucket. Locally,
+# STORAGE_BACKEND=local in .env sends everything to LOCAL_STORAGE_ROOT. Any
+# other value is an error, not a fallback — a typo must not send data to S3.
+STORAGE_BACKEND_VAR = "STORAGE_BACKEND"
+STORAGE_BACKEND_S3 = "s3"
+STORAGE_BACKEND_LOCAL = "local"
 
 # ── Mapbox travel-time sampling ──────────────────────────────────────────────
 # Verified 2026-08-19: Mapbox reports real congestion on Quito's BRT corridors

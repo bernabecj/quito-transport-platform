@@ -3,7 +3,8 @@ Transit Network Loader
 Queries the OpenStreetMap Overpass API for Quito's public transport network
 (bus, trolleybus and metro route relations plus their stop nodes), normalises
 the response into three tabular datasets, and writes Parquet to
-s3://quito-transport-platform/raw/network/year=.../month=.../day=...
+raw/network/year=.../month=.../day=... — in the S3 bucket, or under
+data/local/ when STORAGE_BACKEND=local (see ingestion/storage.py).
 
 Datasets produced
   routes       one row per transit route (Trole, Ecovía, Metrobús, cooperatives)
@@ -21,17 +22,14 @@ Scope note
   data does answer.
 """
 
-import io
 import logging
 import time
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
-import boto3
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 import requests
+from dotenv import load_dotenv
 
 from ingestion.constants import (
     OSM_ROUTE_TYPES,
@@ -42,11 +40,13 @@ from ingestion.constants import (
     OVERPASS_TIMEOUT,
     OVERPASS_URLS,
     QUITO_BBOX,
-    S3_BUCKET_NAME,
     S3_NETWORK_PREFIX,
     TRUNK_ROUTE_PATTERN,
 )
 from ingestion.geometry import RouteGeometry, chain_route_ways, mean_hop_km, project_onto_polyline
+from ingestion.storage import get_storage
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -64,18 +64,22 @@ SEQUENCE_FROM_GEOMETRY = "geometry"  # distance along the chained road ways
 def handler(event, context):
     """Lambda entry point."""
     now = datetime.now(timezone.utc)
+    # Resolved before any request goes out, so a bad STORAGE_BACKEND fails
+    # without spending an Overpass call.
+    storage = get_storage()
 
     payload = fetch_network()
     dfs = parse_network(payload, now)
 
     date_prefix = f"raw/{S3_NETWORK_PREFIX}/year={now.year}/month={now.month:02d}/day={now.day:02d}"
-    written = write_to_s3(dfs, S3_BUCKET_NAME, date_prefix)
+    written = write_raw(dfs, date_prefix, storage)
 
     return {
         "statusCode": 200,
         "files_written": len(written),
         "total_rows": sum(v["rows"] for v in written.values()),
         "prefix": date_prefix,
+        "location": storage.uri(date_prefix),
     }
 
 
@@ -381,17 +385,18 @@ def _stop_record(node: dict, fetched_at: str) -> dict:
     }
 
 
-def write_to_s3(dfs: dict[str, pd.DataFrame], bucket: str, date_prefix: str) -> dict:
-    s3 = boto3.client("s3")
+def write_raw(dfs: dict[str, pd.DataFrame], date_prefix: str, storage=None) -> dict:
+    """Write one Parquet file per dataset under `date_prefix` to the selected
+    backend (S3 or the local folder — see ingestion.storage).
+
+    Returns ``{name: {"key", "rows", "location"}}`` for each file written.
+    """
+    storage = storage or get_storage()
     written = {}
     for name, df in dfs.items():
         key = f"{date_prefix}/{name}.parquet"
-        table = pa.Table.from_pandas(df)
-        buffer = io.BytesIO()
-        pq.write_table(table, buffer)
-        buffer.seek(0)
-        s3.put_object(Bucket=bucket, Key=key, Body=buffer.getvalue())
-        written[name] = {"key": key, "rows": len(df)}
+        location = storage.put_parquet(df, key)
+        written[name] = {"key": key, "rows": len(df), "location": location}
     return written
 
 

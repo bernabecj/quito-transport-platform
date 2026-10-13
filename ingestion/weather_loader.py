@@ -2,7 +2,8 @@
 Weather Loader
 Calls the OpenWeather API (current + 5-day forecast) for Quito's bounding
 box, normalises the response, and writes Parquet to
-s3://quito-transport-raw/weather/year=.../month=.../day=...
+raw/weather/year=.../month=.../day=... — in the S3 bucket, or under
+data/local/ when STORAGE_BACKEND=local (see ingestion/storage.py).
 
 Secret handling
   The API key is read from Secrets Manager at runtime, never injected as a
@@ -12,7 +13,6 @@ Secret handling
   only the secret's *name*; this module fetches the value.
 """
 
-import io
 import json
 import os
 import re
@@ -20,8 +20,6 @@ from datetime import datetime, timezone
 
 import boto3
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 import requests
 from dotenv import load_dotenv
 
@@ -31,8 +29,8 @@ from ingestion.constants import (
     QUITO_LAT,
     QUITO_LON,
     S3_WEATHER_PREFIX,
-    S3_BUCKET_NAME,
 )
+from ingestion.storage import get_storage
 
 load_dotenv()
 
@@ -87,7 +85,9 @@ def _redact(message: str) -> str:
 def handler(event, context):
     """Lambda entry point."""
     api_key = get_api_key()
-    bucket = S3_BUCKET_NAME
+    # Resolved before any request goes out, so a bad STORAGE_BACKEND fails
+    # without spending an API call.
+    storage = get_storage()
     now = datetime.now(timezone.utc)
 
     current_raw = fetch_current(api_key)
@@ -99,9 +99,9 @@ def handler(event, context):
     )
 
     key = f"raw/{S3_WEATHER_PREFIX}/year={now.year}/month={now.month:02d}/day={now.day:02d}/weather.parquet"
-    write_to_s3(df, bucket, key)
+    location = write_raw(df, key, storage)
 
-    return {"statusCode": 200, "records_written": len(df), "s3_key": key}
+    return {"statusCode": 200, "records_written": len(df), "s3_key": key, "location": location}
 
 
 def fetch_current(api_key: str) -> dict:
@@ -158,13 +158,10 @@ def normalize_forecast(data: dict, fetched_at: datetime) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def write_to_s3(df: pd.DataFrame, bucket: str, key: str) -> None:
-    table = pa.Table.from_pandas(df)
-    buffer = io.BytesIO()
-    pq.write_table(table, buffer)
-    buffer.seek(0)
-
-    boto3.client("s3").put_object(Bucket=bucket, Key=key, Body=buffer.getvalue())
+def write_raw(df: pd.DataFrame, key: str, storage=None) -> str:
+    """Write one Parquet file under `key` to the selected backend (S3 or the
+    local folder — see ingestion.storage) and return where it landed."""
+    return (storage or get_storage()).put_parquet(df, key)
 
 
 if __name__ == "__main__":

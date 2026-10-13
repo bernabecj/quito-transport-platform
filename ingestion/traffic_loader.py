@@ -2,7 +2,9 @@
 Corridor Travel-Time Loader
 Samples how long it currently takes to drive each trunk BRT corridor, using the
 Mapbox Directions `driving-traffic` profile, and writes Parquet to
-s3://quito-transport-platform/raw/traffic/year=.../month=.../day=.../hour=...
+raw/traffic/year=.../month=.../day=.../hour=... — in the S3 bucket, or under
+data/local/ when STORAGE_BACKEND=local (see ingestion/storage.py). The network
+snapshot it starts from is read from that same backend.
 
 Why this exists
   Quito publishes no schedules, so schedule adherence cannot be measured (see
@@ -30,12 +32,11 @@ Cost
   stops out of order; network_loader now orders those from the road geometry.)
 
 Partitioning caveat
-  The S3 key below is partitioned to the hour with no minute component, so two
-  runs within the same hour overwrite each other. Sampling faster than hourly
-  requires adding a minute to the key first.
+  The key below is partitioned to the hour with no minute component, so two
+  runs within the same hour overwrite each other — on S3 and on disk alike.
+  Sampling faster than hourly requires adding a minute to the key first.
 """
 
-import io
 import json
 import logging
 import os
@@ -43,8 +44,6 @@ from datetime import datetime, timedelta, timezone
 
 import boto3
 import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
 import requests
 from dotenv import load_dotenv
 
@@ -56,7 +55,6 @@ from ingestion.constants import (
     MAPBOX_MAX_WAYPOINTS,
     MAPBOX_PROFILE,
     MAPBOX_SECRET_KEY,
-    S3_BUCKET_NAME,
     S3_NETWORK_PREFIX,
     S3_TRAFFIC_PREFIX,
     TRAFFIC_SAMPLING_ENABLED_VAR,
@@ -64,6 +62,7 @@ from ingestion.constants import (
 )
 from ingestion.geometry import mean_hop_km
 from ingestion.network_loader import SEQUENCE_FROM_GEOMETRY, SEQUENCE_FROM_MEMBERS
+from ingestion.storage import get_storage
 
 load_dotenv()
 
@@ -89,7 +88,10 @@ def handler(event, context):
         return {"statusCode": 200, "skipped": True, "reason": message}
 
     now = datetime.now(timezone.utc)
-    routes, stops, route_stops = read_latest_network(S3_BUCKET_NAME)
+    # One backend for the whole run: the network snapshot is read from the
+    # same place the sample is written to.
+    storage = get_storage()
+    routes, stops, route_stops = read_latest_network(storage)
     corridors = build_corridors(routes, stops, route_stops)
 
     df = sample_corridors(corridors, get_token(), now)
@@ -98,9 +100,9 @@ def handler(event, context):
         f"raw/{S3_TRAFFIC_PREFIX}/year={now.year}/month={now.month:02d}"
         f"/day={now.day:02d}/hour={now.hour:02d}/corridor_travel_time.parquet"
     )
-    write_to_s3(df, S3_BUCKET_NAME, key)
+    location = write_raw(df, key, storage)
 
-    return {"statusCode": 200, "corridors_sampled": len(df), "s3_key": key}
+    return {"statusCode": 200, "corridors_sampled": len(df), "s3_key": key, "location": location}
 
 
 def get_token() -> str:
@@ -285,28 +287,25 @@ def sample_corridor(corridor: dict, token: str, sampled_at: datetime) -> dict:
     }
 
 
-def read_latest_network(bucket: str) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    """Load the most recent network snapshot written by network_loader."""
-    s3 = boto3.client("s3")
-    listing = s3.list_objects_v2(Bucket=bucket, Prefix=f"raw/{S3_NETWORK_PREFIX}/")
-    keys = [obj["Key"] for obj in listing.get("Contents", [])]
+def read_latest_network(storage=None) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Load the most recent network snapshot written by network_loader, from
+    the selected backend (S3 or the local folder — see ingestion.storage)."""
+    storage = storage or get_storage()
+    keys = storage.list_keys(f"raw/{S3_NETWORK_PREFIX}/")
     if not keys:
         raise RuntimeError(f"no network snapshot under raw/{S3_NETWORK_PREFIX}/")
 
     latest = max(key.rsplit("/", 1)[0] for key in keys)
-    frames = []
-    for name in ("routes", "stops", "route_stops"):
-        body = s3.get_object(Bucket=bucket, Key=f"{latest}/{name}.parquet")["Body"].read()
-        frames.append(pd.read_parquet(io.BytesIO(body)))
-    return tuple(frames)
+    return tuple(
+        storage.get_parquet(f"{latest}/{name}.parquet")
+        for name in ("routes", "stops", "route_stops")
+    )
 
 
-def write_to_s3(df: pd.DataFrame, bucket: str, key: str) -> None:
-    table = pa.Table.from_pandas(df)
-    buffer = io.BytesIO()
-    pq.write_table(table, buffer)
-    buffer.seek(0)
-    boto3.client("s3").put_object(Bucket=bucket, Key=key, Body=buffer.getvalue())
+def write_raw(df: pd.DataFrame, key: str, storage=None) -> str:
+    """Write one Parquet file under `key` to the selected backend (S3 or the
+    local folder — see ingestion.storage) and return where it landed."""
+    return (storage or get_storage()).put_parquet(df, key)
 
 
 if __name__ == "__main__":

@@ -35,6 +35,7 @@ data/samples/.backup/
 .idea/
 *.iml
 .claude/
+data/local/*
 
 # OS
 .DS_Store

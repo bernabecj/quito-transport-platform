@@ -242,9 +242,11 @@ quito-transport-platform/
 │   ├── network_loader.py           # Query Overpass, normalise to Parquet
 │   ├── geometry.py                 # Chain OSM ways, project stops onto the road
 │   ├── traffic_loader.py           # Sample corridor travel time (off by default)
-│   └── weather_loader.py           # Fetch + normalise OpenWeather
+│   ├── weather_loader.py           # Fetch + normalise OpenWeather
+│   └── storage.py                  # Raw-zone backends: S3 or data/local, chosen by STORAGE_BACKEND
 ├── data/
-│   └── samples/                    # Real captured data for offline development
+│   ├── samples/                    # Real captured data for offline development
+│   └── local/                      # Raw zone written by the loaders with STORAGE_BACKEND=local (gitignored)
 ├── scripts/
 │   ├── verify_mapbox_traffic.py    # Go/no-go check on Quito traffic coverage
 │   ├── check_corridors.py          # Which trunk corridors get sampled, and why (offline)
@@ -291,8 +293,9 @@ quito-transport-platform/
 
 - Python 3.11+
 - Docker + Docker Compose (for Metabase and local Airflow)
-- AWS credentials configured (`~/.aws/credentials` or environment variables)
-- OpenWeather API key stored in AWS Secrets Manager or `.env`
+- API keys in `.env` for the loaders you want to run (OpenWeather, Mapbox)
+- AWS credentials (`~/.aws/credentials` or environment variables) — only to
+  write to the real bucket; not needed for local runs, see below
 
 ### Setup
 
@@ -305,12 +308,39 @@ pip install -r requirements.txt
 
 ### Run ingestion locally
 
+The loaders write the raw zone either to the S3 bucket or to a folder in this
+repo. One environment variable chooses, read from `.env`:
+
 ```bash
-python -m ingestion.network_loader   # queries Overpass, writes to S3
+cp .env.example .env                 # STORAGE_BACKEND=local, plus your API keys
 python -m ingestion.weather_loader
+python -m ingestion.network_loader   # queries Overpass
+TRAFFIC_SAMPLING_ENABLED=true python -m ingestion.traffic_loader   # spends Mapbox quota
 ```
 
-To inspect the network data without writing to S3:
+| `STORAGE_BACKEND` | Writes to | Needs AWS |
+| ----------------- | --------- | --------- |
+| `local`           | `data/local/` (gitignored) | no |
+| `s3` or unset     | `s3://quito-transport-platform/` — what the Lambdas do | yes |
+
+Any other value is an error, so a typo cannot send data to S3 by accident.
+
+`data/local/` mirrors the bucket exactly, partition folders included, so
+anything built against the S3 layout works on it unchanged:
+
+```
+data/local/raw/weather/year=2026/month=10/day=13/weather.parquet
+data/local/raw/network/year=2026/month=10/day=13/{routes,stops,route_stops}.parquet
+data/local/raw/traffic/year=2026/month=10/day=13/hour=16/corridor_travel_time.parquet
+```
+
+Same semantics as S3 too: a rerun in the same partition (UTC day, or UTC hour
+for traffic) overwrites that file; a later day or hour adds a new one next to
+it. Note the partitions are UTC — a run at 20:00 Quito time lands in the next
+day's folder. The traffic loader reads the newest `raw/network/` snapshot from
+the same backend it writes to, so run the network loader first.
+
+To inspect the network data without writing anywhere:
 
 ```bash
 python -c "
@@ -333,6 +363,10 @@ cd airflow && astro dev start        # UI at http://localhost:8080
 ```bash
 pytest tests/ -v --cov=ingestion --cov=processing
 ```
+
+No internet or AWS account needed: the loader tests fake the three APIs and
+run the handlers end-to-end against a temporary folder (`tests/test_loaders_local.py`),
+and the S3 backend is exercised against botocore's Stubber (`tests/test_storage.py`).
 
 ### Run the data quality gate
 
