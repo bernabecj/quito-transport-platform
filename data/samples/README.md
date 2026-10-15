@@ -57,6 +57,21 @@ data supports and what it does not. The evidence behind both points above is in
 [`notebooks/01_exploring.ipynb`](../../notebooks/01_exploring.ipynb), sections 8
 and 9. Read the plan before modelling.
 
+## The samples drive the gold build
+
+`python -m processing.gold.build --layout samples` reads exactly these files
+(`routes`, `stops`, `route_stops`, `weather`, `corridor_travel_time_series`)
+and produces the full star schema from them; `tests/gold/test_build.py` pins
+the row counts it expects (515 routes, 485 stops, 2,352 fact rows, …). The
+readers treat the missing provenance columns the same way `traffic_loader`
+does — absent means `osm_member` — so regenerating the network sample with
+the new columns changes nothing downstream except `fct_route_stop` gaining
+values in `member_index` / `distance_along_m` / `snap_distance_m`.
+
+The `break_samples.py` drills corrupt these same files, so they double as
+drills for the gold tests: `overpass-truncated` makes `dim_route` lose 165
+routes and `verify` report orphan `route_id`s.
+
 ## The weather sample is mostly forecasts
 
 `weather/weather.parquet` holds one API call per day at 05:00 Coordinated

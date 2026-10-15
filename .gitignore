@@ -36,6 +36,7 @@ data/samples/.backup/
 *.iml
 .claude/
 data/local/*
+quito-wheels/
 
 # OS
 .DS_Store

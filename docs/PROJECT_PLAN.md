@@ -111,18 +111,21 @@ APIs (OpenStreetMap Overpass + Weather)
 
 ## Analytical Questions
 
-The marts are built to answer these, all from data that exists:
+The marts are built to answer these, all from data that exists. Answered in
+the gold layer (`processing/gold/`, [GOLD_LAYER.md](GOLD_LAYER.md)); the
+pass/fail bar for each is in [ANALYSIS_PLAN.md](ANALYSIS_PLAN.md).
 
-| Question | Data needed |
-| -------- | ----------- |
-| Which parts of Quito are within walking distance of a stop? | `stops` coordinates |
-| Where does stop density thin out? | `stops` + `route_stops` |
-| Which corridors carry many redundant routes, and which carry one? | `route_stops` overlap |
-| Which operators cover which parts of the city? | `routes.operator` |
-| What has been added or withdrawn since the first snapshot? | dated partitions |
-| When does a corridor slow down during the day? | `corridor_travel_time` accumulated over days |
-| Which corridors have the worst peak-to-off-peak spread? | `corridor_travel_time` accumulated over days |
-| Which corridors are least predictable? | variance of `duration_seconds` per corridor |
+| Question | Gold table | Finding so far |
+| -------- | ---------- | -------------- |
+| Which parts of Quito are within walking distance of a stop? | `dim_stop`, `fct_route_stop` | 486 stops, 119 of 515 routes with stops mapped — coverage maps are supported; 77 % of routes have no stop nodes in OSM |
+| Where does stop density thin out? | `dim_stop.route_count` | Estación Río Coca is served by 21 routes; most stops by 1 |
+| Which corridors carry many redundant routes, and which carry one? | `fct_route_stop` | supported, not yet charted |
+| Which operators cover which parts of the city? | `dim_route.operator` + `fct_route_stop` | supported, not yet charted |
+| What has been added or withdrawn since the first snapshot? | `fct_network_snapshot`, `dim_route.last_seen_date` | nothing real: two routes flap in and out of the Overpass response on scattered days; no route withdrawn over 52 snapshots |
+| When does a corridor slow down during the day? | `agg_corridor_hourly_profile` | a 13-hour plateau, not two peaks: 1.47–1.58× the overnight baseline from 06:00 to 19:00, worst at 17:00 |
+| Which corridors have the worst peak-to-off-peak spread? | `agg_corridor_reliability` | MetroBus Corredor Central Norte, +84 % duration; rankings under duration and speed agree on only 3 of 14 corridors, so both are shown |
+| Which corridors are least predictable? | `agg_corridor_reliability` | same corridor first; C6 looks most predictable but reroutes the most (20 % distance spread), which is the confound the table exposes |
+| Weekday vs weekend; weather effects | `agg_corridor_hourly_profile` (`day_type`), `fct_corridor_travel_time` (weather columns) | present but flagged — two weekend days, one weather point |
 
 **Planned enhancement — weather joined geographically.** Weather is currently fetched for a single city-centre coordinate. Quito's valley has real microclimate variation, so fetching several points and joining them to stops by proximity would let coverage analysis account for local conditions. That is a change to `weather_loader.py`, not to the network pipeline.
 
@@ -262,11 +265,11 @@ Metabase dashboard updates
 
 ### Week 2 — Processing, Quality & Warehouse
 
-**Days 8–9: PySpark processing with AWS Glue**
+**Days 8–9: PySpark processing with AWS Glue** — *as built: `processing/gold/`*
 
-- Clean and enrich raw snapshots: deduplicate stops shared across routes, validate coordinates, derive zone from lat/lon
-- Compute derived metrics: stop density per zone, route overlap per corridor, operator coverage per zone
-- Output to S3 processed zone as Parquet
+- No cleaning pass: the exploration found nothing to clean, so the job goes raw → gold directly
+- Star schema (4 dimensions, 4 facts) plus two marts, with `verify` enforcing keys Redshift will not
+- Output to `gold/<table>/` as Parquet, one folder per table — locally under `data/local/gold/`
 
 **Days 10–11: Great Expectations — data quality gate**
 
@@ -278,14 +281,10 @@ Metabase dashboard updates
 - Generate HTML quality reports saved to S3
 - Airflow DAG **stops and alerts** if quality checks fail — data never reaches warehouse dirty
 
-**Days 12–13: Redshift + dbt**
+**Days 12–13: Redshift** — *dbt set aside; the gold tables are the model*
 
-- Load processed data from S3 into Redshift via COPY command
-- Build dbt models:
-  - `stg_routes`, `stg_stops`, `stg_weather` (staging)
-  - `fct_route_stops` (fact — route × stop × snapshot date)
-  - `dim_routes`, `dim_stops`, `dim_weather_conditions` (dimensions — star schema)
-- Add dbt tests: `not_null`, `unique`, `accepted_values`, `relationships`
+- Load the gold Parquet into Redshift via `COPY … FORMAT AS PARQUET` (DDL with DISTKEY/SORTKEY in [GOLD_LAYER.md](GOLD_LAYER.md#4-loading-into-redshift)), or expose it through Spectrum
+- Key integrity is `processing/gold/verify.py` and `tests/gold/`, run before the load
 
 **Day 14: dbt docs + data catalog**
 

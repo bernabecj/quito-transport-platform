@@ -1,6 +1,6 @@
 # Quito Transport Platform
 
-A public data engineering platform that ingests Quito's transit network, corridor travel times and weather, processes it with an AWS-native stack, and surfaces network coverage, peak hours and the city's least predictable routes through a live dashboard.
+A public data engineering platform that ingests Quito's transit network, corridor travel times and weather, builds a star-schema gold layer in PySpark, and surfaces network coverage, peak hours and the city's least predictable routes through a live dashboard.
 
 ![CI](https://github.com/bernabecj/quito-transport-platform/actions/workflows/ci.yml/badge.svg)
 
@@ -34,21 +34,18 @@ APIs (OpenStreetMap Overpass + OpenWeather)
               │
        Airflow DAG (Amazon MWAA)
               │
-   ┌──────────┴──────────┐
-   │                     │
-AWS Glue / PySpark    Great Expectations
-(transform & enrich)  (data quality gate)
-   │                     │
-   └──────────┬──────────┘
+     Great Expectations ─── data quality gate on the raw samples
               │  (quality pass)
-     S3 Processed Zone
+   AWS Glue / PySpark ─── processing/gold: raw → star schema + marts, then verify
               │
-  Amazon Redshift (warehouse)
+     S3 Gold Zone ─── one Parquet folder per table
               │
-      dbt (star schema + tests)
+  Amazon Redshift (COPY, or Spectrum over the gold prefix)
               │
   Metabase on EC2 (dashboards + maps)
 ```
+
+There is no separate "silver" zone: the exploration ([`notebooks/01_exploring.ipynb`](notebooks/01_exploring.ipynb)) found no nulls and no corrupted values in the raw data, so the gold build reads raw directly. dbt was set aside for the same reason — the gold tables *are* the warehouse model, and Redshift loads them as-is. The reasoning and the objectives are in [`docs/ANALYSIS_PLAN.md`](docs/ANALYSIS_PLAN.md); the model and how to run it in [`docs/GOLD_LAYER.md`](docs/GOLD_LAYER.md).
 
 ### Stack
 
@@ -57,8 +54,8 @@ AWS Glue / PySpark    Great Expectations
 | Ingestion      | Python + REST APIs     | AWS Lambda                          |
 | Raw Storage    | Parquet files          | AWS S3 (raw + processed zones)      |
 | Orchestration  | Apache Airflow         | Amazon MWAA                         |
-| Processing     | PySpark                | AWS Glue / EMR Serverless           |
-| Transformation | dbt                    | Runs against Amazon Redshift        |
+| Processing     | PySpark (`processing/gold/`) | AWS Glue / EMR Serverless — raw → gold, plus `verify` |
+| Transformation | — (dbt set aside; the gold layer is the model) | |
 | Warehouse      | SQL analytics          | Amazon Redshift (separate AWS account) |
 | Data Quality   | Great Expectations     | Runs in Glue/Airflow, reports to S3 |
 | Data Catalog   | Schema & lineage       | AWS Glue Data Catalog               |
@@ -105,32 +102,42 @@ The traffic sampler adds a fourth, written once per run rather than per day:
 | ---------------------- | ---------------------------- | --------------------------------------------------------------- |
 | `corridor_travel_time` | one row per corridor per sample | `route_id`, `sampled_at`, `local_hour`, `duration_seconds`, `mean_speed_kmh`, `congestion_*` |
 
-Real samples of every dataset are committed under [`data/samples/`](data/samples/) so the Glue and dbt layers can be built without calling any API.
+Real samples of every dataset are committed under [`data/samples/`](data/samples/) so the gold layer can be built and tested without calling any API (`python -m processing.gold.build --layout samples`).
 
 ---
 
 ## Data Model (Star Schema)
 
+Built by `python -m processing.gold.build` and documented table by table in [`docs/GOLD_LAYER.md`](docs/GOLD_LAYER.md).
+
 ```
-fct_route_stops                 fct_corridor_travel_time      fct_daily_weather
- ├── route_id → dim_routes       ├── route_id → dim_routes      └── condition_id
- ├── stop_id  → dim_stops        └── sampled_at                      → dim_weather_conditions
- └── snapshot_date
+                         dim_date                     dim_weather_condition
+                      (date_key)                         (condition_key)
+                          ▲  ▲                                ▲
+       dim_route ◄──── fct_corridor_travel_time ──────► fct_weather ───────┘
+      (route_id)         (route_id, utc_ts)            (weather_ts)
+        ▲  ▲  ▲
+        │  │  └──────────── fct_route_stop ──────────► dim_stop
+        │  │             (route_id, stop_sequence)     (stop_id)
+        │  └── agg_corridor_hourly_profile  (route_id, local_hour, day_type)
+        └───── agg_corridor_reliability     (route_id)
+
+       fct_network_snapshot  (snapshot_date)
 ```
 
-Analytical questions this supports:
+`fct_corridor_travel_time` is the hub: one row per corridor per sampled hour, with local time, per-day coverage (`is_complete_day` replaces any hard-coded analysis window) and the nearest 3-hour weather slot denormalised on. The dimensions are built from the union of every daily network snapshot (SCD type 1 with `first_seen_date` / `last_seen_date`), because the snapshots flap — two routes drop out of the Overpass response on scattered days and come back. The two `agg_*` marts hold the answers to the questions below, pre-aggregated, so Metabase reads a row instead of recomputing.
 
-- **Coverage** — which parts of Quito are within walking distance of a stop, and which are not?
-- **Service gaps** — where does stop density thin out relative to population?
-- **Route overlap** — which corridors carry many redundant routes while others carry one?
-- **Network change** — what has been added or withdrawn since the first snapshot?
-- **Peak hours** — when does a corridor's travel time rise above its own daily median?
-- **Worst corridors** — which routes show the largest peak-to-off-peak spread?
-- **Unpredictability** — which corridors vary most in travel time, which is closer to what riders actually experience than an average?
+Analytical questions this supports, and what the data has shown so far (one hourly week, 14 corridors — [`docs/ANALYSIS_PLAN.md`](docs/ANALYSIS_PLAN.md) has the pass/fail bars):
 
-The last three need accumulated samples. A single snapshot cannot express them, because every one compares a corridor against its own history.
+- **Coverage** — which parts of Quito are within walking distance of a stop? (`fct_route_stop`, `dim_stop`)
+- **Service gaps** — where does stop density thin out? (`dim_stop.route_count`)
+- **Route overlap** — which corridors carry many redundant routes? (`fct_route_stop`)
+- **Network change** — what has been added or withdrawn since the first snapshot? (`fct_network_snapshot`, `dim_route.last_seen_date`)
+- **Peak hours** — travel time sits at 1.47–1.58× the overnight baseline from 06:00 to 19:00, a 13-hour plateau rather than two rush-hour spikes; worst at 17:00. (`agg_corridor_hourly_profile`)
+- **Worst corridors** — MetroBus Corredor Central Norte tops every ranking: +84 % duration at its peak. (`agg_corridor_reliability`)
+- **Unpredictability** — within-hour variability, ranked under both duration and speed because Mapbox reroutes between calls (up to 20 % distance spread on C6) and a rerouting corridor looks falsely stable on duration. (`agg_corridor_reliability`)
 
-All models and column descriptions live in the dbt docs site (see [Running dbt docs](#running-dbt-docs)).
+Weekday-vs-weekend and weather effects are in the tables but flagged: two weekend days and one city-centre weather point are not enough for a claim.
 
 ### Known data limitations
 
@@ -210,21 +217,18 @@ great_expectations checkpoint run raw_samples_checkpoint
 
 [`tests/test_quality_suites.py`](tests/test_quality_suites.py) pins every threshold that mirrors `ingestion/constants.py` and proves each suite fails on the corruption it exists to catch. Details, including how the Data Context is wired, in [`quality/README.md`](quality/README.md).
 
-### 3. dbt Tests — data integrity in the warehouse
+### 3. Gold-layer tests and `verify` — data integrity in the warehouse model
 
-```yaml
-- name: stop_id
-  tests:
-      - unique
-      - not_null
-- name: route_id
-  tests:
-      - relationships:
-            to: ref('dim_routes')
-            field: route_id
+Redshift records primary and foreign keys but does not enforce them, so the guarantee that the star schema joins correctly lives in the build itself:
+
+```bash
+pytest tests/gold                                           # 44 tests: each transformation on hand-built frames,
+                                                            # plus an end-to-end build on data/samples/
+python -m processing.gold.verify --gold-root data/local/gold  # 32 checks: every table present, every PK unique,
+                                                            # no orphan FK, no traffic hour without weather; exit 0/1
 ```
 
-Custom SQL test: `dbt/tests/assert_stops_within_quito_bbox.sql`
+The end-to-end test pins the row count of every table, asserts a rebuild is byte-identical (idempotent), and proves `verify` returns 1 when an orphan key is injected. To watch the suite fail on purpose, corrupt the samples with the existing drills — `python scripts/break_samples.py overpass-truncated` then `pytest tests/gold/test_build.py` — and put them back with `python scripts/restore_samples.py`.
 
 ---
 
@@ -246,16 +250,25 @@ quito-transport-platform/
 │   └── storage.py                  # Raw-zone backends: S3 or data/local, chosen by STORAGE_BACKEND
 ├── data/
 │   ├── samples/                    # Real captured data for offline development
-│   └── local/                      # Raw zone written by the loaders with STORAGE_BACKEND=local (gitignored)
+│   └── local/                      # raw/ written by the loaders with STORAGE_BACKEND=local; gold/ by the build (gitignored)
 ├── scripts/
 │   ├── verify_mapbox_traffic.py    # Go/no-go check on Quito traffic coverage
 │   ├── check_corridors.py          # Which trunk corridors get sampled, and why (offline)
 │   ├── break_samples.py            # Corrupt the samples so the quality gate fails (drills)
 │   └── restore_samples.py          # Put the pristine samples back
 ├── processing/
-│   └── glue_jobs/
-│       ├── clean_network.py        # PySpark: clean raw network snapshots
-│       └── enrich_weather.py       # PySpark: join network + weather
+│   ├── gold/                       # PySpark: raw zone → star schema + marts (see docs/GOLD_LAYER.md)
+│   │   ├── config.py               #   roots, layouts, table names, schema-evolution defaults
+│   │   ├── session.py              #   the one SparkSession configuration (UTC)
+│   │   ├── io.py                   #   readers that normalise the raw zone; the gold writer
+│   │   ├── time.py                 #   utc_ts / local_ts / local_date / date_key
+│   │   ├── dimensions.py           #   dim_date, dim_route, dim_stop
+│   │   ├── weather.py              #   fct_weather, dim_weather_condition
+│   │   ├── facts.py                #   fct_corridor_travel_time, fct_route_stop, fct_network_snapshot
+│   │   ├── marts.py                #   agg_corridor_hourly_profile, agg_corridor_reliability
+│   │   ├── build.py                #   python -m processing.gold.build
+│   │   └── verify.py               #   python -m processing.gold.verify
+│   └── glue_jobs/                  # superseded by gold/; kept until the Glue job definition moves
 ├── gx/
 │   └── great_expectations.yml      # GE Data Context: datasources over data/samples, stores in quality/
 ├── quality/
@@ -264,20 +277,20 @@ quito-transport-platform/
 │   │   └── raw_samples_checkpoint.yml  # Runs every suite; what CI runs
 │   └── README.md
 ├── tests/
+│   ├── gold/                       # Gold-layer unit tests + end-to-end build on data/samples/
 │   └── test_quality_suites.py      # Suites track constants.py and fail on bad data
-├── dbt/
-│   ├── models/
-│   │   ├── staging/                # stg_routes, stg_stops, stg_weather
-│   │   └── marts/                  # fct_route_stops, dim_routes, dim_stops, dim_weather_conditions
-│   ├── tests/
-│   └── dbt_project.yml
+├── dbt/                            # set aside: the gold layer replaced it (docs/ANALYSIS_PLAN.md)
 ├── metabase/
 │   └── docker-compose.yml          # Local Metabase for development
 ├── infrastructure/
 │   ├── terraform/                  # Lambda, Glue, Redshift, IAM
 │   └── scripts/                    # Container image build + push
 ├── docs/
-│   └── PROJECT_PLAN.md
+│   ├── PROJECT_PLAN.md
+│   ├── ANALYSIS_PLAN.md            # objectives, what the data supports, the gold model
+│   └── GOLD_LAYER.md               # run the build anywhere; every table and column; Redshift load
+├── notebooks/
+│   └── 01_exploring.ipynb          # the data-quality record; runs on Databricks or plain PySpark
 ├── DATA_GOVERNANCE.md              # Ownership, retention, PII, SLA, access control
 ├── requirements.txt
 ├── .gitignore
@@ -292,6 +305,7 @@ quito-transport-platform/
 ### Prerequisites
 
 - Python 3.11+
+- Java 17 or 21 (JDK) — for the PySpark gold build; the dev container ships it
 - Docker + Docker Compose (for Metabase and local Airflow)
 - API keys in `.env` for the loaders you want to run (OpenWeather, Mapbox)
 - AWS credentials (`~/.aws/credentials` or environment variables) — only to
@@ -303,7 +317,7 @@ quito-transport-platform/
 git clone https://github.com/bernabecj/quito-transport-platform.git
 cd quito-transport-platform
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt                     # includes pyspark; a JDK must be on PATH
 ```
 
 ### Run ingestion locally
@@ -352,6 +366,16 @@ for name, df in dfs.items():
 "
 ```
 
+### Build the gold layer
+
+```bash
+python -m processing.gold.build  --layout samples                      # from data/samples/, no raw zone needed
+python -m processing.gold.build  --raw-root data/local/raw             # from what the loaders wrote locally
+python -m processing.gold.verify --gold-root data/local/gold           # integrity checks, exit 0/1
+```
+
+Output lands in `data/local/gold/<table>/` as Parquet; `pd.read_parquet("data/local/gold/dim_route")` is the quickest look. Setup from scratch for the dev container, Windows natively and Databricks is in [`docs/GOLD_LAYER.md`](docs/GOLD_LAYER.md#1-running-the-build-from-scratch).
+
 ### Run local Airflow
 
 ```bash
@@ -376,22 +400,6 @@ great_expectations checkpoint run raw_samples_checkpoint
 
 Validates every committed sample against its suite. Needs no credentials; see [`quality/README.md`](quality/README.md).
 
-### Run dbt models
-
-```bash
-cd dbt
-dbt deps
-dbt run
-dbt test
-```
-
-### Running dbt docs
-
-```bash
-dbt docs generate
-dbt docs serve   # opens at http://localhost:8080
-```
-
 ### Start Metabase (local)
 
 ```bash
@@ -406,11 +414,9 @@ MB_DB_PASSWORD=secret docker compose up -d
 
 Every push runs the full CI pipeline via GitHub Actions (`.github/workflows/ci.yml`):
 
-1. `pytest` — unit tests
-2. `dbt test` — warehouse integrity checks
-3. Great Expectations checkpoint `raw_samples_checkpoint` — raw data quality suites against the committed samples
-
-Merging to `main` also triggers a deploy of updated dbt models to Redshift.
+1. `pytest` — unit tests, including `tests/gold/` (the end-to-end gold build on the committed samples)
+2. Great Expectations checkpoint `raw_samples_checkpoint` — raw data quality suites against the committed samples
+3. `dbt test` — still in the workflow file; to be removed or retargeted once the Redshift load is in place
 
 ---
 
@@ -434,7 +440,7 @@ OpenStreetMap data is licensed under the [ODbL](https://www.openstreetmap.org/co
 | Resource                  | URL                              |
 | ------------------------- | -------------------------------- |
 | Metabase dashboard        | _Coming soon_                    |
-| dbt docs site             | _Coming soon_                    |
+| Gold model reference      | [docs/GOLD_LAYER.md](docs/GOLD_LAYER.md) |
 | Great Expectations report | _Coming soon_ (S3 public bucket) |
 
 ---
